@@ -1,0 +1,26 @@
+[package]
+name = "heatshrink"
+version = "0.0.1"
+edition = "2021"
+authors = ["J-C Dubois"]
+description = "A minimal implementation of the heatshrink compression algorithm for no_std environments"
+readme = "README.md"
+publish = false
+autobins = false
+license = "ISC"
+
+[profile.release]
+opt-level = 's'  # Optimize for size.
+lto = true # Link Time Optimization (LTO)
+# codegen-units = 1 # Set this to 1 to allow for maximum size reduction optimizations:
+# panic = 'abort' # removes the need for this extra unwinding code.
+
+[dependencies]
+
+[dev-dependencies]
+hex-literal = "0.4.1"
+
+[features]
+default = []
+# Define features
+heatshrink-use-index = []

@@ -1,0 +1,36 @@
+[package]
+name = "heatshrink-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.heatshrink]
+path = ".."
+
+[features]
+heatshrink-use-index = ["heatshrink/heatshrink-use-index"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "encode_decode"
+path = "fuzz_targets/encode_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "decode_random"
+path = "fuzz_targets/decode_random.rs"
+test = false
+doc = false
