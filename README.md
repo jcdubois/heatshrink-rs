@@ -10,14 +10,14 @@ heatshrink parameters are hardcoded to window_sz2 = 8 and lookahead_sz2 = 4.
 
 ## Key Features:
 
-- **Low memory usage
+- **Low memory usage:**
     It is useful for many general cases with < 300 bytes.
-- **Incremental, bounded CPU use**
+- **Incremental, bounded CPU use:**
     You can chew on input data in arbitrarily tiny bites.
     This is a useful property in hard real-time environments.
-- **For now you are limited to the static version because of no_std.
+- **For now you are limited to the static version because of no_std:**
     The library doesn't impose any constraints on memory management.
-- **ISC license**
+- **ISC license:**
     You can use it freely, even for commercial purposes.
 
 ## Getting Started:
@@ -25,16 +25,16 @@ heatshrink parameters are hardcoded to window_sz2 = 8 and lookahead_sz2 = 4.
 ### Basic Usage
 
 1. Allocate a heatshrink encoder or heatshrink decoder state machine using
-either HeatshrinkEncoder::new() or HeatshrinkDecoder::new(). You can also
-reset an existing state machine by calling the reset() function on the state
+either `HeatshrinkEncoder::new` or `HeatshrinkDecoder::new`. You can also
+reset an existing state machine by calling the `reset` function on the state
 machine.
 
-2. Use sink() to sink an input buffer into the state machine. The
+2. Use `sink` to sink an input buffer into the state machine. The
 `input_size` pointer argument will be set to indicate how many bytes of
 the input buffer were actually consumed. (If 0 bytes were conusmed, the
 buffer is full.)
 
-3. Use poll() to move output from the state machine into an output
+3. Use `poll` to move output from the state machine into an output
 buffer. The `output_size` pointer argument will be set to indicate how
 many bytes were output, and the function return value will indicate
 whether further output is available. (The state machine may not output
