@@ -40,15 +40,13 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
     let mut dec = HeatshrinkDecoder::new();
 
     while total_input_size < src.len() {
-        let mut segment_input_size = 0;
-
         // Fill the input buffer from the src buffer
-        match dec.sink(&src[total_input_size..], &mut segment_input_size) {
-            HSsinkRes::HSRSinkOK => {
+        match dec.sink(&src[total_input_size..]) {
+            (HSsinkRes::HSRSinkOK, segment_input_size) => {
                 total_input_size += segment_input_size;
             }
-            HSsinkRes::HSRSinkFull => {}
-            HSsinkRes::HSRSinkErrorMisuse => {
+            (HSsinkRes::HSRSinkFull, _) => {}
+            (HSsinkRes::HSRSinkErrorMisuse, _) => {
                 return Err(HSError::HSErrorInternal);
             }
         }
@@ -58,17 +56,15 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
         } else {
             // process the current input buffer
             loop {
-                let mut segment_output_size = 0;
-
-                match dec.poll(&mut dst[total_output_size..], &mut segment_output_size) {
-                    HSpollRes::HSRPollMore => {
+                match dec.poll(&mut dst[total_output_size..]) {
+                    (HSpollRes::HSRPollMore, _) => {
                         return Err(HSError::HSErrorOutputFull);
                     }
-                    HSpollRes::HSRPollEmpty => {
+                    (HSpollRes::HSRPollEmpty, segment_output_size) => {
                         total_output_size += segment_output_size;
                         break;
                     }
-                    HSpollRes::HSRPollErrorMisuse => {
+                    (HSpollRes::HSRPollErrorMisuse, _) => {
                         return Err(HSError::HSErrorInternal);
                     }
                 }
@@ -122,12 +118,11 @@ impl HeatshrinkDecoder {
     }
 
     /// Add an input buffer to be processed/uncompressed
-    pub fn sink(&mut self, input_buffer: &[u8], input_size: &mut usize) -> HSsinkRes {
+    pub fn sink(&mut self, input_buffer: &[u8]) -> (HSsinkRes, usize) {
         let remaining_size = self.input_buffer.len() - self.input_size as usize;
 
         if remaining_size == 0 {
-            *input_size = 0;
-            return HSsinkRes::HSRSinkFull;
+            return (HSsinkRes::HSRSinkFull, 0);
         }
 
         let copy_size = if remaining_size < input_buffer.len() {
@@ -140,20 +135,19 @@ impl HeatshrinkDecoder {
         self.input_buffer[self.input_size as usize..(self.input_size as usize + copy_size)]
             .copy_from_slice(&input_buffer[0..copy_size]);
         self.input_size += copy_size as u16;
-        *input_size = copy_size;
 
-        return HSsinkRes::HSRSinkOK;
+        return (HSsinkRes::HSRSinkOK, copy_size);
     }
 
     /// function to process the input/internal buffer and put the uncompressed
     /// stream in the provided buffer.
-    pub fn poll(&mut self, output_buffer: &mut [u8], output_size: &mut usize) -> HSpollRes {
+    pub fn poll(&mut self, output_buffer: &mut [u8]) -> (HSpollRes, usize) {
         if output_buffer.len() == 0 {
-            return HSpollRes::HSRPollErrorMisuse;
+            return (HSpollRes::HSRPollErrorMisuse, 0);
         } else {
-            *output_size = 0;
+            let mut output_size: usize = 0;
 
-            let mut output_info = OutputInfo::new(output_buffer, output_size);
+            let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
 
             loop {
                 let in_state = self.state;
@@ -183,9 +177,9 @@ impl HeatshrinkDecoder {
                 // output buffer are exhausted.
                 if self.state == in_state {
                     if output_info.can_take_byte() {
-                        return HSpollRes::HSRPollEmpty;
+                        return (HSpollRes::HSRPollEmpty, output_size);
                     } else {
-                        return HSpollRes::HSRPollMore;
+                        return (HSpollRes::HSRPollMore, output_size);
                     }
                 }
             }
