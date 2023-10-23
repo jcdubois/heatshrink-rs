@@ -51,7 +51,7 @@ pub struct HeatshrinkEncoder {
     current_byte: u8,
     bit_index: u8,
     state: HSEstate,
-    search_index: [i16; 2 << HEATSHRINK_WINDOWS_BITS],
+    search_index: [Option<u16>; 2 << HEATSHRINK_WINDOWS_BITS],
     input_buffer: [u8; 2 << HEATSHRINK_WINDOWS_BITS],
 }
 
@@ -125,7 +125,7 @@ impl HeatshrinkEncoder {
                 current_byte: 0,
                 bit_index: 0x80,
                 state: HSEstate::HSESNotFull,
-                search_index: [0; 2 << HEATSHRINK_WINDOWS_BITS],
+                search_index: [None; 2 << HEATSHRINK_WINDOWS_BITS],
                 input_buffer: [0; 2 << HEATSHRINK_WINDOWS_BITS],
             }
         }
@@ -165,7 +165,7 @@ impl HeatshrinkEncoder {
         #[cfg(feature = "heatshrink-use-index")]
         {
             // memset self.search_index to 0
-            self.search_index.iter_mut().for_each(|m| *m = 0);
+            self.search_index.iter_mut().for_each(|m| *m = None);
         }
     }
 
@@ -421,23 +421,18 @@ impl HeatshrinkEncoder {
              *    not be usable, so temporary data could be stored there to
              *    dynamically improve the index.
              * */
-            let mut last: [i16; 256] = [-1; 256];
-            let end : usize = (self.get_input_offset() + self.input_size - 1).into();
+            let mut last: [Option<u16>; 256] = [None; 256];
+            let end: usize = (self.get_input_offset() + self.input_size - 1).into();
 
             for i in 0..end {
                 let v: usize = self.input_buffer[i].into();
                 self.search_index[i] = last[v];
-                last[v] = i.into();
+                last[v] = Some(i as u16);
             }
         }
     }
 
-    fn find_longest_match(
-        &self,
-        start: u16,
-        end: u16,
-        maxlen: u16,
-    ) -> Option<(u16, u16)> {
+    fn find_longest_match(&self, start: u16, end: u16, maxlen: u16) -> Option<(u16, u16)> {
         let mut match_maxlen: usize = 0;
         let mut match_index: usize = 0;
 
@@ -476,36 +471,46 @@ impl HeatshrinkEncoder {
 
         #[cfg(feature = "heatshrink-use-index")]
         {
-            let mut pos = self.search_index[end as usize];
+            let mut pos: u16 = end;
 
-            while pos >= start.into() {
-                let mut len: usize = 1;
-
-                if self.input_buffer[pos as usize + match_maxlen]
-                    != self.input_buffer[end as usize + match_maxlen]
-                {
-                    pos = self.search_index[pos as usize];
-                    continue;
-                }
-
-                while len < maxlen as usize {
-                    if self.input_buffer[pos as usize + len]
-                        != self.input_buffer[end as usize + len]
-                    {
+            loop {
+                match self.search_index[pos as usize] {
+                    None => {
                         break;
                     }
-                    len += 1;
-                }
+                    Some(x) => {
+                        pos = x;
 
-                if len > match_maxlen {
-                    match_maxlen = len as usize;
-                    match_index = pos as usize;
-                    if len == maxlen as usize {
-                        break;
+                        if pos < start.into() {
+                            break;
+                        }
+
+                        let mut len: usize = 1;
+
+                        if self.input_buffer[pos as usize + match_maxlen]
+                            != self.input_buffer[end as usize + match_maxlen]
+                        {
+                            continue;
+                        }
+
+                        while len < maxlen as usize {
+                            if self.input_buffer[pos as usize + len]
+                                != self.input_buffer[end as usize + len]
+                            {
+                                break;
+                            }
+                            len += 1;
+                        }
+
+                        if len > match_maxlen {
+                            match_maxlen = len as usize;
+                            match_index = pos as usize;
+                            if len == maxlen as usize {
+                                break;
+                            }
+                        }
                     }
                 }
-
-                pos = self.search_index[pos as usize];
             }
         }
 
