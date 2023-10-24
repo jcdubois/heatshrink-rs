@@ -29,16 +29,13 @@ either `HeatshrinkEncoder::new` or `HeatshrinkDecoder::new`. You can also
 reset an existing state machine by calling the `reset` function on the state
 machine.
 
-2. Use `sink` to sink an input buffer into the state machine. The
-`input_size` pointer argument will be set to indicate how many bytes of
-the input buffer were actually consumed. (If 0 bytes were conusmed, the
-buffer is full.)
+2. Use `sink` to sink an input buffer into the state machine. In the
+returned result you get a CR code and the amount of bytes that were actually
+consumed (If 0 bytes were conusmed, the buffer is full.).
 
 3. Use `poll` to move output from the state machine into an output
-buffer. The `output_size` pointer argument will be set to indicate how
-many bytes were output, and the function return value will indicate
-whether further output is available. (The state machine may not output
-any data until it has received enough input.)
+buffer. In the returned result you get a CR code and the amount bytes
+that were writen to the provided buffer.
 
 Repeat steps 2 and 3 to stream data through the state machine. Since
 it's doing data compression, the input and output sizes can vary
@@ -59,11 +56,11 @@ calling `reset` on the state machine.
 ## Configuration
 
 No configuration is needed (for now) on this RUST implementation as
-parameters are hot user defined (they are hardcoded).
+parameters are not user defined (they are hardcoded).
 
-On cargo build you can choose to enable the lookup table to speed up the
-compression phase by selecting --features "heatshrink-use-index" on the
-cargo command line.
+On the cargo build command you can choose to enable the lookup table to
+speed up the compression phase by selecting --features "heatshrink-use-index"
+on the cargo command line.
 
 ## More Information and Benchmarks:
 
