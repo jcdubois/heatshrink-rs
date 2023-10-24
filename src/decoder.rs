@@ -9,12 +9,12 @@ use super::HEATSHRINK_WINDOWS_BITS;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum HSDstate {
-    HSDSTagBit,          /* tag bit */
-    HSDSYieldLiteral,    /* ready to yield literal byte */
-    HSDSBackrefIndexMsb, /* most significant byte of index */
-    HSDSBackrefIndexLsb, /* least significant byte of index */
-    HSDSBackrefCountLsb, /* least significant byte of count */
-    HSDSYieldBackref,    /* ready to yield back-reference */
+    TagBit,          /* tag bit */
+    YieldLiteral,    /* ready to yield literal byte */
+    BackrefIndexMsb, /* most significant byte of index */
+    BackrefIndexLsb, /* least significant byte of index */
+    BackrefCountLsb, /* least significant byte of count */
+    YieldBackref,    /* ready to yield back-reference */
 }
 
 /// the decoder instance
@@ -55,34 +55,37 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
             return Err(HSError::HSErrorOutputFull);
         } else {
             // process the current input buffer
-            loop {
-                match dec.poll(&mut dst[total_output_size..]) {
-                    (HSpollRes::HSRPollMore, _) => {
-                        return Err(HSError::HSErrorOutputFull);
-                    }
-                    (HSpollRes::HSRPollEmpty, segment_output_size) => {
-                        total_output_size += segment_output_size;
-                        break;
-                    }
-                    (HSpollRes::HSRPollErrorMisuse, _) => {
-                        return Err(HSError::HSErrorInternal);
-                    }
+            match dec.poll(&mut dst[total_output_size..]) {
+                (HSpollRes::HSRPollMore, _) => {
+                    return Err(HSError::HSErrorOutputFull);
+                }
+                (HSpollRes::HSRPollEmpty, segment_output_size) => {
+                    total_output_size += segment_output_size;
+                }
+                (HSpollRes::HSRPollErrorMisuse, _) => {
+                    return Err(HSError::HSErrorInternal);
                 }
             }
-        }
 
-        // if all the src buffer is processed, finish the uncompress stream
-        if total_input_size == src.len() {
-            match dec.finish() {
-                HSfinishRes::HSRFinishDone => {}
-                HSfinishRes::HSRFinishMore => {
-                    return Err(HSError::HSErrorOutputFull);
+            // if all the src buffer is processed, finish the uncompress stream
+            if total_input_size == src.len() {
+                match dec.finish() {
+                    HSfinishRes::HSRFinishDone => {}
+                    HSfinishRes::HSRFinishMore => {
+                        return Err(HSError::HSErrorOutputFull);
+                    }
                 }
             }
         }
     }
 
     Ok(&dst[..total_output_size])
+}
+
+impl Default for HeatshrinkDecoder {
+    fn default() -> Self {
+        HeatshrinkDecoder::new()
+    }
 }
 
 impl HeatshrinkDecoder {
@@ -96,7 +99,7 @@ impl HeatshrinkDecoder {
             head_index: 0,
             current_byte: 0,
             bit_index: 0,
-            state: HSDstate::HSDSTagBit,
+            state: HSDstate::TagBit,
             input_buffer: [0; HEATSHRINK_INPUT_BUFFER_SIZE],
             output_buffer: [0; 1 << HEATSHRINK_WINDOWS_BITS],
         }
@@ -111,7 +114,7 @@ impl HeatshrinkDecoder {
         self.head_index = 0;
         self.current_byte = 0;
         self.bit_index = 0;
-        self.state = HSDstate::HSDSTagBit;
+        self.state = HSDstate::TagBit;
         // memset self.buffer to 0
         self.input_buffer.iter_mut().for_each(|m| *m = 0);
         self.output_buffer.iter_mut().for_each(|m| *m = 0);
@@ -136,14 +139,14 @@ impl HeatshrinkDecoder {
             .copy_from_slice(&input_buffer[0..copy_size]);
         self.input_size += copy_size as u16;
 
-        return (HSsinkRes::HSRSinkOK, copy_size);
+        (HSsinkRes::HSRSinkOK, copy_size)
     }
 
     /// function to process the input/internal buffer and put the uncompressed
     /// stream in the provided buffer.
     pub fn poll(&mut self, output_buffer: &mut [u8]) -> (HSpollRes, usize) {
-        if output_buffer.len() == 0 {
-            return (HSpollRes::HSRPollErrorMisuse, 0);
+        if output_buffer.is_empty() {
+            (HSpollRes::HSRPollErrorMisuse, 0)
         } else {
             let mut output_size: usize = 0;
 
@@ -153,22 +156,22 @@ impl HeatshrinkDecoder {
                 let in_state = self.state;
 
                 match in_state {
-                    HSDstate::HSDSTagBit => {
+                    HSDstate::TagBit => {
                         self.state = self.st_tag_bit();
                     }
-                    HSDstate::HSDSYieldLiteral => {
+                    HSDstate::YieldLiteral => {
                         self.state = self.st_yield_literal(&mut output_info);
                     }
-                    HSDstate::HSDSBackrefIndexMsb => {
+                    HSDstate::BackrefIndexMsb => {
                         self.state = self.st_backref_index_msb();
                     }
-                    HSDstate::HSDSBackrefIndexLsb => {
+                    HSDstate::BackrefIndexLsb => {
                         self.state = self.st_backref_index_lsb();
                     }
-                    HSDstate::HSDSBackrefCountLsb => {
+                    HSDstate::BackrefCountLsb => {
                         self.state = self.st_backref_count_lsb();
                     }
-                    HSDstate::HSDSYieldBackref => {
+                    HSDstate::YieldBackref => {
                         self.state = self.st_yield_backref(&mut output_info);
                     }
                 }
@@ -188,12 +191,12 @@ impl HeatshrinkDecoder {
 
     fn st_tag_bit(&mut self) -> HSDstate {
         match self.get_bits(1) {
-            None => HSDstate::HSDSTagBit,
+            None => HSDstate::TagBit,
             Some(0) => {
                 self.output_index = 0;
-                HSDstate::HSDSBackrefIndexLsb
+                HSDstate::BackrefIndexLsb
             }
-            Some(_) => HSDstate::HSDSYieldLiteral,
+            Some(_) => HSDstate::YieldLiteral,
         }
     }
 
@@ -202,50 +205,50 @@ impl HeatshrinkDecoder {
         // to the window buffer. (Note that the repetition can include itself)
         if output_info.can_take_byte() {
             match self.get_bits(8) {
-                None => HSDstate::HSDSYieldLiteral, // input_buffer is consumed
+                None => HSDstate::YieldLiteral, // input_buffer is consumed
                 Some(x) => {
                     let c: u8 = (x & 0xff) as u8;
                     let mask = self.output_buffer.len() - 1;
                     self.output_buffer[self.head_index as usize & mask] = c;
                     self.head_index += 1;
                     output_info.push_byte(c);
-                    HSDstate::HSDSTagBit
+                    HSDstate::TagBit
                 }
             }
         } else {
-            return HSDstate::HSDSYieldLiteral;
+            HSDstate::YieldLiteral
         }
     }
 
     fn st_backref_index_msb(&mut self) -> HSDstate {
         match self.get_bits(0) {
-            None => HSDstate::HSDSBackrefIndexMsb,
+            None => HSDstate::BackrefIndexMsb,
             Some(x) => {
                 self.output_index = x << 8;
-                HSDstate::HSDSBackrefIndexLsb
+                HSDstate::BackrefIndexLsb
             }
         }
     }
 
     fn st_backref_index_lsb(&mut self) -> HSDstate {
         match self.get_bits(8) {
-            None => HSDstate::HSDSBackrefIndexLsb,
+            None => HSDstate::BackrefIndexLsb,
             Some(x) => {
                 self.output_index |= x;
                 self.output_index += 1;
                 self.output_count = 0;
-                HSDstate::HSDSBackrefCountLsb
+                HSDstate::BackrefCountLsb
             }
         }
     }
 
     fn st_backref_count_lsb(&mut self) -> HSDstate {
         match self.get_bits(HEATSHRINK_LOOKAHEAD_BITS as u8) {
-            None => HSDstate::HSDSBackrefCountLsb,
+            None => HSDstate::BackrefCountLsb,
             Some(x) => {
                 self.output_count |= x;
                 self.output_count += 1;
-                HSDstate::HSDSYieldBackref
+                HSDstate::YieldBackref
             }
         }
     }
@@ -275,10 +278,10 @@ impl HeatshrinkDecoder {
             self.output_count -= count as u16;
 
             if self.output_count == 0 {
-                return HSDstate::HSDSTagBit;
+                return HSDstate::TagBit;
             }
         }
-        return HSDstate::HSDSYieldBackref;
+        HSDstate::YieldBackref
     }
 
     /// Get the next COUNT bits from the input buffer, saving incremental
@@ -292,10 +295,8 @@ impl HeatshrinkDecoder {
         // If we aren't able to get COUNT bits, suspend immediately, because
         // we don't track how many bits of COUNT we've accumulated before
         // suspend.
-        if self.input_size == 0 {
-            if self.bit_index < (1 << count - 1) {
-                return None;
-            }
+        if self.input_size == 0 && self.bit_index < (1 << (count - 1)) {
+            return None;
         }
 
         let mut accumulator: u16 = 0;
@@ -315,15 +316,15 @@ impl HeatshrinkDecoder {
                 }
                 self.bit_index = 0x80;
             }
-            accumulator = accumulator << 1;
+            accumulator <<= 1;
             if self.current_byte & self.bit_index != 0 {
                 accumulator |= 0x1;
             }
-            self.bit_index = self.bit_index >> 1;
+            self.bit_index >>= 1;
             i += 1;
         }
 
-        return Some(accumulator);
+        Some(accumulator)
     }
 
     /// Finish the uncompress stream

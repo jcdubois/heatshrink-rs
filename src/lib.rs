@@ -30,7 +30,7 @@ pub enum HSsinkRes {
 }
 
 /// Return code for poll function call
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HSpollRes {
     /// Error in input parameters
     HSRPollErrorMisuse,
@@ -82,7 +82,7 @@ impl<'a, 'b> OutputInfo<'a, 'b> {
 
     /// Check if there is space left in the OutputInfo buffer
     fn can_take_byte(&self) -> bool {
-        return *self.output_size < self.output_buffer.len();
+        *self.output_size < self.output_buffer.len()
     }
 
     /// get the free space in the buffer
