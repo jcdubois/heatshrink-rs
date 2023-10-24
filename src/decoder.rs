@@ -243,7 +243,7 @@ impl HeatshrinkDecoder {
     }
 
     fn st_backref_count_lsb(&mut self) -> HSDstate {
-        match self.get_bits(HEATSHRINK_LOOKAHEAD_BITS as u8) {
+        match self.get_bits(HEATSHRINK_LOOKAHEAD_BITS) {
             None => HSDstate::BackrefCountLsb,
             Some(x) => {
                 self.output_count |= x;

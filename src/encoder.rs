@@ -504,7 +504,7 @@ impl HeatshrinkEncoder {
                         }
 
                         if len > match_maxlen {
-                            match_maxlen = len as usize;
+                            match_maxlen = len;
                             match_index = pos as usize;
                             if len == maxlen as usize {
                                 break;
