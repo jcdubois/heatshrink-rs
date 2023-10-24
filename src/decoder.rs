@@ -42,37 +42,37 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
     while total_input_size < src.len() {
         // Fill the input buffer from the src buffer
         match dec.sink(&src[total_input_size..]) {
-            (HSsinkRes::HSRSinkOK, segment_input_size) => {
+            (HSsinkRes::SinkOK, segment_input_size) => {
                 total_input_size += segment_input_size;
             }
-            (HSsinkRes::HSRSinkFull, _) => {}
-            (HSsinkRes::HSRSinkErrorMisuse, _) => {
-                return Err(HSError::HSErrorInternal);
+            (HSsinkRes::SinkFull, _) => {}
+            (HSsinkRes::SinkErrorMisuse, _) => {
+                return Err(HSError::Internal);
             }
         }
 
         if total_output_size == dst.len() {
-            return Err(HSError::HSErrorOutputFull);
+            return Err(HSError::OutputFull);
         } else {
             // process the current input buffer
             match dec.poll(&mut dst[total_output_size..]) {
-                (HSpollRes::HSRPollMore, _) => {
-                    return Err(HSError::HSErrorOutputFull);
+                (HSpollRes::PollMore, _) => {
+                    return Err(HSError::OutputFull);
                 }
-                (HSpollRes::HSRPollEmpty, segment_output_size) => {
+                (HSpollRes::PollEmpty, segment_output_size) => {
                     total_output_size += segment_output_size;
                 }
-                (HSpollRes::HSRPollErrorMisuse, _) => {
-                    return Err(HSError::HSErrorInternal);
+                (HSpollRes::PollErrorMisuse, _) => {
+                    return Err(HSError::Internal);
                 }
             }
 
             // if all the src buffer is processed, finish the uncompress stream
             if total_input_size == src.len() {
                 match dec.finish() {
-                    HSfinishRes::HSRFinishDone => {}
-                    HSfinishRes::HSRFinishMore => {
-                        return Err(HSError::HSErrorOutputFull);
+                    HSfinishRes::FinishDone => {}
+                    HSfinishRes::FinishMore => {
+                        return Err(HSError::OutputFull);
                     }
                 }
             }
@@ -125,7 +125,7 @@ impl HeatshrinkDecoder {
         let remaining_size = self.input_buffer.len() - self.input_size as usize;
 
         if remaining_size == 0 {
-            return (HSsinkRes::HSRSinkFull, 0);
+            return (HSsinkRes::SinkFull, 0);
         }
 
         let copy_size = if remaining_size < input_buffer.len() {
@@ -139,14 +139,14 @@ impl HeatshrinkDecoder {
             .copy_from_slice(&input_buffer[0..copy_size]);
         self.input_size += copy_size as u16;
 
-        (HSsinkRes::HSRSinkOK, copy_size)
+        (HSsinkRes::SinkOK, copy_size)
     }
 
     /// function to process the input/internal buffer and put the uncompressed
     /// stream in the provided buffer.
     pub fn poll(&mut self, output_buffer: &mut [u8]) -> (HSpollRes, usize) {
         if output_buffer.is_empty() {
-            (HSpollRes::HSRPollErrorMisuse, 0)
+            (HSpollRes::PollErrorMisuse, 0)
         } else {
             let mut output_size: usize = 0;
 
@@ -180,9 +180,9 @@ impl HeatshrinkDecoder {
                 // output buffer are exhausted.
                 if self.state == in_state {
                     if output_info.can_take_byte() {
-                        return (HSpollRes::HSRPollEmpty, output_size);
+                        return (HSpollRes::PollEmpty, output_size);
                     } else {
-                        return (HSpollRes::HSRPollMore, output_size);
+                        return (HSpollRes::PollMore, output_size);
                     }
                 }
             }
@@ -331,9 +331,9 @@ impl HeatshrinkDecoder {
     pub fn finish(&self) -> HSfinishRes {
         // Return Done if input_buffer is consumed. Else return More.
         if self.input_size == 0 {
-            HSfinishRes::HSRFinishDone
+            HSfinishRes::FinishDone
         } else {
-            HSfinishRes::HSRFinishMore
+            HSfinishRes::FinishMore
         }
     }
 }

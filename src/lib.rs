@@ -22,40 +22,40 @@ const HEATSHRINK_INPUT_BUFFER_SIZE: usize = 32;
 #[derive(Debug)]
 pub enum HSsinkRes {
     /// instance is not in correct state.
-    HSRSinkErrorMisuse,
+    SinkErrorMisuse,
     /// Internal buffer is full, no data was added
-    HSRSinkFull,
+    SinkFull,
     /// Data was correctly added to internal buffer
-    HSRSinkOK,
+    SinkOK,
 }
 
 /// Return code for poll function call
 #[derive(Debug, PartialEq, Eq)]
 pub enum HSpollRes {
     /// Error in input parameters
-    HSRPollErrorMisuse,
+    PollErrorMisuse,
     /// More data available to be processed
-    HSRPollMore,
+    PollMore,
     /// No more data to process
-    HSRPollEmpty,
+    PollEmpty,
 }
 
 /// Return code for finish function call
 #[derive(Debug)]
 pub enum HSfinishRes {
     /// More data availble in input buffer
-    HSRFinishMore,
+    FinishMore,
     /// Operation is done
-    HSRFinishDone,
+    FinishDone,
 }
 
 /// Error that can be encountered while (un)compresing data
 #[derive(Debug)]
 pub enum HSError {
     /// The output buffer was not large enough to hold output data
-    HSErrorOutputFull,
+    OutputFull,
     /// Some internal error did occur
-    HSErrorInternal,
+    Internal,
 }
 
 /// Structure to manage the output buffer and keep track of how much it is

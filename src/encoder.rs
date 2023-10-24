@@ -68,36 +68,36 @@ pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
     while total_input_size < src.len() {
         // Fill the input buffer from the src buffer
         match enc.sink(&src[total_input_size..]) {
-            (HSsinkRes::HSRSinkOK, segment_input_size) => {
+            (HSsinkRes::SinkOK, segment_input_size) => {
                 total_input_size += segment_input_size;
             }
-            (HSsinkRes::HSRSinkFull, _) => {}
-            (HSsinkRes::HSRSinkErrorMisuse, _) => {
-                return Err(HSError::HSErrorInternal);
+            (HSsinkRes::SinkFull, _) => {}
+            (HSsinkRes::SinkErrorMisuse, _) => {
+                return Err(HSError::Internal);
             }
         }
 
         // if all the src buffer is processed, finish the compress stream
         if total_input_size == src.len() {
             match enc.finish() {
-                HSfinishRes::HSRFinishDone => {}
-                HSfinishRes::HSRFinishMore => {}
+                HSfinishRes::FinishDone => {}
+                HSfinishRes::FinishMore => {}
             }
         }
 
         if total_output_size == dst.len() {
-            return Err(HSError::HSErrorOutputFull);
+            return Err(HSError::OutputFull);
         } else {
             // process the current input buffer
             match enc.poll(&mut dst[total_output_size..]) {
-                (HSpollRes::HSRPollMore, _) => {
-                    return Err(HSError::HSErrorOutputFull);
+                (HSpollRes::PollMore, _) => {
+                    return Err(HSError::OutputFull);
                 }
-                (HSpollRes::HSRPollEmpty, segment_output_size) => {
+                (HSpollRes::PollEmpty, segment_output_size) => {
                     total_output_size += segment_output_size;
                 }
-                (HSpollRes::HSRPollErrorMisuse, _) => {
-                    return Err(HSError::HSErrorInternal);
+                (HSpollRes::PollErrorMisuse, _) => {
+                    return Err(HSError::Internal);
                 }
             }
         }
@@ -176,19 +176,19 @@ impl HeatshrinkEncoder {
     pub fn sink(&mut self, input_buffer: &[u8]) -> (HSsinkRes, usize) {
         /* Sinking more content after saying the content is done, tsk tsk */
         if self.is_finishing() {
-            return (HSsinkRes::HSRSinkErrorMisuse, 0);
+            return (HSsinkRes::SinkErrorMisuse, 0);
         }
 
         /* Sinking more content before processing is done */
         if self.state != HSEstate::NotFull {
-            return (HSsinkRes::HSRSinkErrorMisuse, 0);
+            return (HSsinkRes::SinkErrorMisuse, 0);
         }
 
         let write_offset: usize = (self.get_input_offset() + self.input_size).into();
         let remaining_size: usize = (self.get_input_buffer_size() - self.input_size).into();
 
         if remaining_size == 0 {
-            return (HSsinkRes::HSRSinkFull, 0);
+            return (HSsinkRes::SinkFull, 0);
         }
 
         let copy_size = if remaining_size < input_buffer.len() {
@@ -206,14 +206,14 @@ impl HeatshrinkEncoder {
             self.state = HSEstate::Filled;
         }
 
-        (HSsinkRes::HSRSinkOK, copy_size)
+        (HSsinkRes::SinkOK, copy_size)
     }
 
     /// function to process the input/internal buffer and put the compressed
     /// stream in the provided buffer.
     pub fn poll(&mut self, output_buffer: &mut [u8]) -> (HSpollRes, usize) {
         if output_buffer.is_empty() {
-            (HSpollRes::HSRPollMore, 0)
+            (HSpollRes::PollMore, 0)
         } else {
             let mut output_size: usize = 0;
             let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
@@ -223,7 +223,7 @@ impl HeatshrinkEncoder {
 
                 match in_state {
                     HSEstate::NotFull => {
-                        return (HSpollRes::HSRPollEmpty, output_size);
+                        return (HSpollRes::PollEmpty, output_size);
                     }
                     HSEstate::Filled => {
                         self.do_indexing();
@@ -251,14 +251,14 @@ impl HeatshrinkEncoder {
                         self.state = self.st_flush_bit_buffer(&mut output_info);
                     }
                     HSEstate::Done => {
-                        return (HSpollRes::HSRPollEmpty, output_size);
+                        return (HSpollRes::PollEmpty, output_size);
                     }
                 }
 
                 // If the current state cannot advance, check if output
                 // buffer is exhausted.
                 if self.state == in_state && !output_info.can_take_byte() {
-                    return (HSpollRes::HSRPollMore, output_size);
+                    return (HSpollRes::PollMore, output_size);
                 }
             }
         }
@@ -273,9 +273,9 @@ impl HeatshrinkEncoder {
         }
 
         if self.state == HSEstate::Done {
-            HSfinishRes::HSRFinishDone
+            HSfinishRes::FinishDone
         } else {
-            HSfinishRes::HSRFinishMore
+            HSfinishRes::FinishMore
         }
     }
 
