@@ -308,6 +308,7 @@ impl HeatshrinkEncoder {
                 Some(match_pos) => {
                     self.match_pos = match_pos.0;
                     self.match_length = match_pos.1;
+                    assert!(self.match_pos <= 1 << HEATSHRINK_WINDOWS_BITS);
                 }
             }
             HSEstate::YieldTagBit
@@ -433,6 +434,8 @@ impl HeatshrinkEncoder {
         }
     }
 
+    /// Return the longest match for the bytes at buf[end:end+maxlen] between
+    /// buf[start] and buf[end-1]. If no match is found, return -1.
     fn find_longest_match(&self, start: u16, end: u16, maxlen: u16) -> Option<(u16, u16)> {
         let mut match_maxlen: usize = 0;
         let mut match_index: usize = 0;
@@ -457,6 +460,7 @@ impl HeatshrinkEncoder {
                         match_maxlen = len;
                         match_index = pos;
                         if len == maxlen.into() {
+                            // don't keep searching
                             break;
                         }
                     }
@@ -507,6 +511,7 @@ impl HeatshrinkEncoder {
                             match_maxlen = len;
                             match_index = pos as usize;
                             if len == maxlen as usize {
+                                // don't keep searching
                                 break;
                             }
                         }
@@ -518,6 +523,10 @@ impl HeatshrinkEncoder {
         let break_even_point: usize =
             (1 + HEATSHRINK_WINDOWS_BITS + HEATSHRINK_LOOKAHEAD_BITS).into();
 
+        // Instead of comparing break_even_point against 8*match_maxlen,
+        // compare match_maxlen against break_even_point/8 to avoid
+        // overflow. Since MIN_WINDOW_BITS and MIN_LOOKAHEAD_BITS are 4 and
+        // 3, respectively, break_even_point/8 will always be at least 1.
         if match_maxlen > (break_even_point / 8) {
             Some((end - match_index as u16, match_maxlen as u16))
         } else {
@@ -545,7 +554,12 @@ impl HeatshrinkEncoder {
         count
     }
 
+    /// Push COUNT (max 8) bits to the output buffer, which has room.
+    /// Bytes are set from the lowest bits, up.
     fn push_bits(&mut self, count: u8, bits: u8, output_info: &mut OutputInfo) {
+        assert!(count <= 8);
+        // If adding a whole byte and at the start of a new output byte,
+        // just push it through whole and skip the bit IO loop.
         if count == 8 && self.bit_index == 0x80 {
             output_info.push_byte(bits);
         } else {
