@@ -20,11 +20,11 @@ enum HSDstate {
 /// the decoder instance
 #[derive(Debug)]
 pub struct HeatshrinkDecoder {
-    input_size: u16,
-    input_index: u16,
+    input_size: usize,
+    input_index: usize,
+    output_index: usize,
+    head_index: usize,
     output_count: u16,
-    output_index: u16,
-    head_index: u16,
     current_byte: u8,
     bit_index: u8,
     state: HSDstate,
@@ -122,7 +122,7 @@ impl HeatshrinkDecoder {
 
     /// Add an input buffer to be processed/uncompressed
     pub fn sink(&mut self, input_buffer: &[u8]) -> (HSsinkRes, usize) {
-        let remaining_size = self.input_buffer.len() - self.input_size as usize;
+        let remaining_size = self.input_buffer.len() - self.input_size;
 
         if remaining_size == 0 {
             return (HSsinkRes::SinkFull, 0);
@@ -135,9 +135,9 @@ impl HeatshrinkDecoder {
         };
 
         // memcpy content of input_buffer into self.input_buffer.
-        self.input_buffer[self.input_size as usize..(self.input_size as usize + copy_size)]
+        self.input_buffer[self.input_size..(self.input_size + copy_size)]
             .copy_from_slice(&input_buffer[0..copy_size]);
-        self.input_size += copy_size as u16;
+        self.input_size += copy_size;
 
         (HSsinkRes::SinkOK, copy_size)
     }
@@ -209,7 +209,7 @@ impl HeatshrinkDecoder {
                 Some(x) => {
                     let c: u8 = (x & 0xff) as u8;
                     let mask = self.output_buffer.len() - 1;
-                    self.output_buffer[self.head_index as usize & mask] = c;
+                    self.output_buffer[self.head_index & mask] = c;
                     self.head_index += 1;
                     output_info.push_byte(c);
                     HSDstate::TagBit
@@ -224,7 +224,7 @@ impl HeatshrinkDecoder {
         match self.get_bits(0) {
             None => HSDstate::BackrefIndexMsb,
             Some(x) => {
-                self.output_index = x << 8;
+                self.output_index = (x << 8) as usize;
                 HSDstate::BackrefIndexLsb
             }
         }
@@ -234,7 +234,7 @@ impl HeatshrinkDecoder {
         match self.get_bits(8) {
             None => HSDstate::BackrefIndexLsb,
             Some(x) => {
-                self.output_index |= x;
+                self.output_index |= x as usize;
                 self.output_index += 1;
                 self.output_count = 0;
                 HSDstate::BackrefCountLsb
@@ -267,9 +267,9 @@ impl HeatshrinkDecoder {
                 let c = if self.output_index > self.head_index {
                     0
                 } else {
-                    self.output_buffer[(self.head_index - self.output_index) as usize & mask]
+                    self.output_buffer[(self.head_index - self.output_index) & mask]
                 };
-                self.output_buffer[self.head_index as usize & mask] = c;
+                self.output_buffer[self.head_index & mask] = c;
                 output_info.push_byte(c);
                 self.head_index += 1;
                 i += 1;
@@ -307,7 +307,7 @@ impl HeatshrinkDecoder {
                 if self.input_size == 0 {
                     return None;
                 }
-                self.current_byte = self.input_buffer[self.input_index as usize];
+                self.current_byte = self.input_buffer[self.input_index];
                 self.input_index += 1;
                 if self.input_index == self.input_size {
                     // input_buffer is consumed

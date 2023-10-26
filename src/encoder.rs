@@ -24,10 +24,10 @@ enum HSEstate {
 /// The encoder instance
 #[derive(Debug)]
 pub struct HeatshrinkEncoder {
-    input_size: u16,
-    match_scan_index: u16,
-    match_length: u16,
-    match_pos: u16,
+    input_size: usize,
+    match_scan_index: usize,
+    match_length: usize,
+    match_pos: usize,
     outgoing_bits: u16,
     outgoing_bits_count: u8,
     flags: u8,
@@ -41,17 +41,17 @@ pub struct HeatshrinkEncoder {
 /// The encoder instance
 #[derive(Debug)]
 pub struct HeatshrinkEncoder {
-    input_size: u16,
-    match_scan_index: u16,
-    match_length: u16,
-    match_pos: u16,
+    input_size: usize,
+    match_scan_index: usize,
+    match_length: usize,
+    match_pos: usize,
     outgoing_bits: u16,
     outgoing_bits_count: u8,
     flags: u8,
     current_byte: u8,
     bit_index: u8,
     state: HSEstate,
-    search_index: [Option<u16>; 2 << HEATSHRINK_WINDOWS_BITS],
+    search_index: [Option<usize>; 2 << HEATSHRINK_WINDOWS_BITS],
     input_buffer: [u8; 2 << HEATSHRINK_WINDOWS_BITS],
 }
 
@@ -71,7 +71,9 @@ pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
             (HSsinkRes::SinkOK, segment_input_size) => {
                 total_input_size += segment_input_size;
             }
-            (HSsinkRes::SinkFull, _) => {}
+            (HSsinkRes::SinkFull, _) => {
+                return Err(HSError::Internal);
+            }
             (HSsinkRes::SinkErrorMisuse, _) => {
                 return Err(HSError::Internal);
             }
@@ -184,8 +186,7 @@ impl HeatshrinkEncoder {
             return (HSsinkRes::SinkErrorMisuse, 0);
         }
 
-        let write_offset: usize = (self.get_input_offset() + self.input_size).into();
-        let remaining_size: usize = (self.get_input_buffer_size() - self.input_size).into();
+        let remaining_size = self.get_input_buffer_size() - self.input_size;
 
         if remaining_size == 0 {
             return (HSsinkRes::SinkFull, 0);
@@ -197,10 +198,12 @@ impl HeatshrinkEncoder {
             input_buffer.len()
         };
 
+        let write_offset = self.get_input_offset() + self.input_size;
+
         // memcpy content of input_buffer into self.input_buffer
         self.input_buffer[write_offset..write_offset + copy_size]
             .copy_from_slice(&input_buffer[0..copy_size]);
-        self.input_size += copy_size as u16;
+        self.input_size += copy_size;
 
         if self.input_size == self.get_input_buffer_size() {
             self.state = HSEstate::Filled;
@@ -322,7 +325,7 @@ impl HeatshrinkEncoder {
                 HSEstate::YieldLiteral
             } else {
                 self.add_tag_bit(output_info, 0);
-                self.outgoing_bits = self.match_pos - 1;
+                self.outgoing_bits = self.match_pos as u16 - 1;
                 self.outgoing_bits_count = 8;
                 HSEstate::YieldBrIndex
             }
@@ -345,7 +348,7 @@ impl HeatshrinkEncoder {
             if self.push_outgoing_bits(output_info) > 0 {
                 HSEstate::YieldBrIndex
             } else {
-                self.outgoing_bits = self.match_length - 1;
+                self.outgoing_bits = self.match_length as u16 - 1;
                 self.outgoing_bits_count = 4;
                 HSEstate::YieldBrLength
             }
@@ -388,15 +391,15 @@ impl HeatshrinkEncoder {
         self.push_bits(1, tag, output_info)
     }
 
-    fn get_input_offset(&self) -> u16 {
+    fn get_input_offset(&self) -> usize {
         self.get_input_buffer_size()
     }
 
-    fn get_input_buffer_size(&self) -> u16 {
-        (self.input_buffer.len() / 2) as u16
+    fn get_input_buffer_size(&self) -> usize {
+        self.input_buffer.len() / 2
     }
 
-    fn get_lookahead_size(&self) -> u16 {
+    fn get_lookahead_size(&self) -> usize {
         1 << HEATSHRINK_LOOKAHEAD_BITS
     }
 
@@ -413,45 +416,48 @@ impl HeatshrinkEncoder {
              * For example, if buf[200] == 'x', then index[200] will either
              * be an offset i such that buf[i] == 'x', or a negative offset
              * to indicate end-of-list. This significantly speeds up matching,
-             * while only using sizeof(int16_t)*sizeof(buffer) bytes of RAM.
+             * while only using sizeof(Option<u16>)*sizeof(buffer) bytes of
+             * RAM.
              *
              * Future optimization options:
-             * 1. Since any negative value represents end-of-list, the other
-             *    15 bits could be used to improve the index dynamically.
-             *
-             * 2. Likewise, the last lookahead_sz bytes of the index will
-             *    not be usable, so temporary data could be stored there to
+             * -  The last lookahead_sz bytes of the index will not be
+             *    usable, so temporary data could be stored there to
              *    dynamically improve the index.
              * */
-            let mut last: [Option<u16>; 256] = [None; 256];
-            let end: usize = (self.get_input_offset() + self.input_size - 1).into();
+            let mut last: [Option<usize>; 256] = [None; 256];
+            let end = self.get_input_offset() + self.input_size - 1;
 
             for i in 0..end {
                 let v: usize = self.input_buffer[i].into();
                 self.search_index[i] = last[v];
-                last[v] = Some(i as u16);
+                last[v] = Some(i);
             }
         }
     }
 
     /// Return the longest match for the bytes at buf[end:end+maxlen] between
     /// buf[start] and buf[end-1]. If no match is found, return -1.
-    fn find_longest_match(&self, start: u16, end: u16, maxlen: u16) -> Option<(u16, u16)> {
+    fn find_longest_match(
+        &self,
+        start: usize,
+        end: usize,
+        maxlen: usize,
+    ) -> Option<(usize, usize)> {
         let mut match_maxlen: usize = 0;
         let mut match_index: usize = 0;
 
         #[cfg(not(feature = "heatshrink-use-index"))]
         {
-            let mut pos: usize = (end - 1).into();
+            let mut pos = end - 1;
 
-            while pos >= start.into() {
-                if (self.input_buffer[pos + match_maxlen]
-                    == self.input_buffer[end as usize + match_maxlen])
-                    && (self.input_buffer[pos] == self.input_buffer[end as usize])
+            while pos >= start {
+                if (self.input_buffer[pos] == self.input_buffer[end])
+                    && (self.input_buffer[pos + match_maxlen]
+                        == self.input_buffer[end + match_maxlen])
                 {
                     let mut len: usize = 1;
-                    while len < maxlen.into() {
-                        if self.input_buffer[pos + len] != self.input_buffer[end as usize + len] {
+                    while len < maxlen {
+                        if self.input_buffer[pos + len] != self.input_buffer[end + len] {
                             break;
                         }
                         len += 1;
@@ -459,7 +465,7 @@ impl HeatshrinkEncoder {
                     if len > match_maxlen {
                         match_maxlen = len;
                         match_index = pos;
-                        if len == maxlen.into() {
+                        if len == maxlen {
                             // don't keep searching
                             break;
                         }
@@ -476,10 +482,10 @@ impl HeatshrinkEncoder {
 
         #[cfg(feature = "heatshrink-use-index")]
         {
-            let mut pos: u16 = end;
+            let mut pos = end;
 
             loop {
-                match self.search_index[pos as usize] {
+                match self.search_index[pos] {
                     None => {
                         break;
                     }
@@ -492,16 +498,14 @@ impl HeatshrinkEncoder {
 
                         let mut len: usize = 1;
 
-                        if self.input_buffer[pos as usize + match_maxlen]
-                            != self.input_buffer[end as usize + match_maxlen]
+                        if self.input_buffer[pos + match_maxlen]
+                            != self.input_buffer[end + match_maxlen]
                         {
                             continue;
                         }
 
-                        while len < maxlen as usize {
-                            if self.input_buffer[pos as usize + len]
-                                != self.input_buffer[end as usize + len]
-                            {
+                        while len < maxlen {
+                            if self.input_buffer[pos + len] != self.input_buffer[end + len] {
                                 break;
                             }
                             len += 1;
@@ -509,8 +513,8 @@ impl HeatshrinkEncoder {
 
                         if len > match_maxlen {
                             match_maxlen = len;
-                            match_index = pos as usize;
-                            if len == maxlen as usize {
+                            match_index = pos;
+                            if len == maxlen {
                                 // don't keep searching
                                 break;
                             }
@@ -528,7 +532,7 @@ impl HeatshrinkEncoder {
         // overflow. Since MIN_WINDOW_BITS and MIN_LOOKAHEAD_BITS are 4 and
         // 3, respectively, break_even_point/8 will always be at least 1.
         if match_maxlen > (break_even_point / 8) {
-            Some((end - match_index as u16, match_maxlen as u16))
+            Some((end - match_index, match_maxlen))
         } else {
             None
         }
@@ -557,10 +561,10 @@ impl HeatshrinkEncoder {
     /// Push COUNT (max 8) bits to the output buffer, which has room.
     /// Bytes are set from the lowest bits, up.
     fn push_bits(&mut self, count: u8, bits: u8, output_info: &mut OutputInfo) {
-        assert!(count <= 8);
+        assert!(count > 0 && count <= 8);
         // If adding a whole byte and at the start of a new output byte,
         // just push it through whole and skip the bit IO loop.
-        if count == 8 && self.bit_index == 0x80 {
+        if self.bit_index == 0x80 && count == 8 {
             output_info.push_byte(bits);
         } else {
             let mut i: u8 = count;
@@ -568,11 +572,12 @@ impl HeatshrinkEncoder {
                 if (bits & (1 << (i - 1))) != 0 {
                     self.current_byte |= self.bit_index;
                 }
-                self.bit_index >>= 1;
-                if self.bit_index == 0 {
+                if self.bit_index == 1 {
                     self.bit_index = 0x80;
                     output_info.push_byte(self.current_byte);
                     self.current_byte = 0;
+                } else {
+                    self.bit_index >>= 1;
                 }
                 i -= 1;
             }
@@ -581,7 +586,7 @@ impl HeatshrinkEncoder {
 
     fn push_literal_byte(&mut self, output_info: &mut OutputInfo) {
         let input_offset = self.match_scan_index - 1;
-        let c = self.input_buffer[(self.get_input_offset() + input_offset) as usize];
+        let c = self.input_buffer[self.get_input_offset() + input_offset];
         self.push_bits(8, c, output_info);
     }
 
@@ -591,10 +596,8 @@ impl HeatshrinkEncoder {
         // than the maximum size, because if it isn't, we're done anyway.
         let remaining_size = self.get_input_buffer_size() - self.match_scan_index; // unprocessed bytes
         let shift_size = self.get_input_buffer_size() + remaining_size;
-        self.input_buffer.copy_within(
-            self.match_scan_index as usize..(self.match_scan_index + shift_size) as usize,
-            0,
-        );
+        self.input_buffer
+            .copy_within(self.match_scan_index..self.match_scan_index + shift_size, 0);
         self.match_scan_index = 0;
         self.input_size -= self.get_input_buffer_size() - remaining_size;
     }
