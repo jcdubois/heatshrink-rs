@@ -37,7 +37,7 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
     let mut total_input_size = 0;
     let mut total_output_size = 0;
 
-    let mut dec = HeatshrinkDecoder::new();
+    let mut dec: HeatshrinkDecoder = Default::default();
 
     while total_input_size < src.len() {
         // Fill the input buffer from the src buffer

@@ -14,8 +14,12 @@ pub mod decoder;
 /// module to compress data
 pub mod encoder;
 
-const HEATSHRINK_WINDOWS_BITS: u8 = 8;
-const HEATSHRINK_LOOKAHEAD_BITS: u8 = 4;
+/// Base-2 log of LZSS sliding window size
+pub const HEATSHRINK_WINDOWS_BITS: u8 = 8;
+
+/// Number of bits used for back-reference lengths
+pub const HEATSHRINK_LOOKAHEAD_BITS: u8 = 4;
+
 const HEATSHRINK_INPUT_BUFFER_SIZE: usize = 32;
 
 /// Return code for sink finction call

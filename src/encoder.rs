@@ -63,7 +63,7 @@ pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
     let mut total_input_size = 0;
     let mut total_output_size = 0;
 
-    let mut enc = HeatshrinkEncoder::new();
+    let mut enc: HeatshrinkEncoder = Default::default();
 
     while total_input_size < src.len() {
         // Fill the input buffer from the src buffer

@@ -1,6 +1,6 @@
 [package]
 name = "heatshrink"
-version = "0.0.1"
+version = "0.4.1"
 edition = "2021"
 authors = ["J-C Dubois"]
 description = "A minimal implementation of the heatshrink compression algorithm for no_std environments"
@@ -9,6 +9,14 @@ publish = false
 autobins = false
 license = "ISC"
 
+[lib]
+name = "heatshrink"
+path = "src/lib.rs"
+
+[[bin]]
+name = "heatshrink"
+path = "src/bin/heatshrink.rs"
+
 [profile.release]
 opt-level = 's'  # Optimize for size.
 lto = true # Link Time Optimization (LTO)
@@ -16,6 +24,7 @@ lto = true # Link Time Optimization (LTO)
 # panic = 'abort' # removes the need for this extra unwinding code.
 
 [dependencies]
+clap = { version = "4.4.7", features = ["derive"] }
 
 [dev-dependencies]
 hex-literal = "0.4.1"
