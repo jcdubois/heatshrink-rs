@@ -135,12 +135,19 @@ fn decode(mut input_file: &File, mut output_file: &File) {
 
     let mut dec: heatshrink::decoder::HeatshrinkDecoder = Default::default();
 
+    let mut output_bytes_processed = 0;
+
     loop {
         let input_bytes_read = input_file.read(&mut input_buffer).unwrap();
 
         if input_bytes_read == 0 {
             match dec.finish() {
                 heatshrink::HSfinishRes::FinishDone => {
+                    if output_bytes_processed != 0 {
+                        let _ = output_file
+                            .write(&output_buffer[0..output_bytes_processed])
+                            .unwrap();
+                    }
                     // the input input_buffer if empty now.
                     break;
                 }
@@ -172,22 +179,18 @@ fn decode(mut input_file: &File, mut output_file: &File) {
 
             loop {
                 // process the current input buffer
-                match dec.poll(&mut output_buffer[0..]) {
+                match dec.poll(&mut output_buffer[output_bytes_processed..]) {
                     (heatshrink::HSpollRes::PollMore, segment_output_size) => {
-                        if segment_output_size != 0 {
-                            let _ = output_file
-                                .write(&output_buffer[0..segment_output_size])
-                                .unwrap();
-                        }
+                        output_bytes_processed += segment_output_size;
+                        let _ = output_file
+                            .write(&output_buffer[0..output_bytes_processed])
+                            .unwrap();
+                        output_bytes_processed = 0;
                         // Some more data is avaialble in input_buffer.
                         // Let's loop.
                     }
                     (heatshrink::HSpollRes::PollEmpty, segment_output_size) => {
-                        if segment_output_size != 0 {
-                            let _ = output_file
-                                .write(&output_buffer[0..segment_output_size])
-                                .unwrap();
-                        }
+                        output_bytes_processed += segment_output_size;
                         // The input_buffer is consumed.
                         // Exit the loop.
                         break;
