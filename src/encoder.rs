@@ -128,7 +128,7 @@ impl HeatshrinkEncoder {
                 outgoing_bits_count: 0,
                 flags: 0,
                 current_byte: 0,
-                bit_index: 0x80,
+                bit_index: 8,
                 state: HSEstate::NotFull,
                 search_index: [None; 2 << HEATSHRINK_WINDOWS_BITS],
                 input_buffer: [0; 2 << HEATSHRINK_WINDOWS_BITS],
@@ -146,7 +146,7 @@ impl HeatshrinkEncoder {
                 outgoing_bits_count: 0,
                 flags: 0,
                 current_byte: 0,
-                bit_index: 0x80,
+                bit_index: 8,
                 state: HSEstate::NotFull,
                 input_buffer: [0; 2 << HEATSHRINK_WINDOWS_BITS],
             }
@@ -163,7 +163,7 @@ impl HeatshrinkEncoder {
         self.outgoing_bits_count = 0;
         self.flags = 0;
         self.current_byte = 0;
-        self.bit_index = 0x80;
+        self.bit_index = 8;
         self.state = HSEstate::NotFull;
         // memset self.buffer to 0
         self.input_buffer.iter_mut().for_each(|m| *m = 0);
@@ -252,6 +252,7 @@ impl HeatshrinkEncoder {
                     }
                     HSEstate::FlushBits => {
                         self.state = self.st_flush_bit_buffer(&mut output_info);
+                        return (HSpollRes::PollEmpty, output_size);
                     }
                     HSEstate::Done => {
                         return (HSpollRes::PollEmpty, output_size);
@@ -377,7 +378,7 @@ impl HeatshrinkEncoder {
     }
 
     fn st_flush_bit_buffer(&self, output_info: &mut OutputInfo) -> HSEstate {
-        if self.bit_index == 0x80 {
+        if self.bit_index == 8 {
             HSEstate::Done
         } else if output_info.can_take_byte() {
             output_info.push_byte(self.current_byte);
@@ -562,25 +563,22 @@ impl HeatshrinkEncoder {
     /// Bytes are set from the lowest bits, up.
     fn push_bits(&mut self, count: u8, bits: u8, output_info: &mut OutputInfo) {
         assert!(count > 0 && count <= 8);
-        // If adding a whole byte and at the start of a new output byte,
-        // just push it through whole and skip the bit IO loop.
-        if self.bit_index == 0x80 && count == 8 {
-            output_info.push_byte(bits);
-        } else {
-            let mut i: u8 = count;
-            while i != 0 {
-                if (bits & (1 << (i - 1))) != 0 {
-                    self.current_byte |= self.bit_index;
-                }
-                if self.bit_index == 1 {
-                    self.bit_index = 0x80;
-                    output_info.push_byte(self.current_byte);
-                    self.current_byte = 0;
-                } else {
-                    self.bit_index >>= 1;
-                }
-                i -= 1;
+
+        if count >= self.bit_index {
+            let mut shift: u8 = count - self.bit_index;
+            let tmp_byte: u8 = self.current_byte | bits >> shift;
+            output_info.push_byte(tmp_byte);
+            if shift == 0 {
+                self.bit_index = 8;
+                self.current_byte = 0;
+            } else {
+                shift = 8 - shift;
+                self.bit_index = shift;
+                self.current_byte = bits << shift;
             }
+        } else {
+            self.bit_index -= count;
+            self.current_byte |= bits << self.bit_index;
         }
     }
 
