@@ -139,6 +139,12 @@ impl HeatshrinkDecoder {
             .copy_from_slice(&input_buffer[0..copy_size]);
         self.input_size += copy_size;
 
+        if self.bit_index == 0 {
+            self.current_byte = self.input_buffer[self.input_index];
+            self.input_index += 1;
+            self.bit_index = 8;
+        }
+
         (HSsinkRes::SinkOK, copy_size)
     }
 
@@ -263,18 +269,22 @@ impl HeatshrinkDecoder {
                 count = usize::from(self.output_count);
             }
 
+            let mut head_index = self.head_index;
+            let output_index = self.output_index;
+
             while i < count {
-                let c = if self.output_index > self.head_index {
+                let c = if output_index > head_index {
                     0
                 } else {
-                    self.output_buffer[(self.head_index - self.output_index) & mask]
+                    self.output_buffer[(head_index - output_index) & mask]
                 };
-                self.output_buffer[self.head_index & mask] = c;
+                self.output_buffer[head_index & mask] = c;
                 output_info.push_byte(c);
-                self.head_index += 1;
+                head_index += 1;
                 i += 1;
             }
 
+            self.head_index = head_index;
             self.output_count -= count as u16;
 
             if self.output_count == 0 {
@@ -288,40 +298,84 @@ impl HeatshrinkDecoder {
     /// progress. Returns None on end of input, or if more than 15 bits are
     /// requested.
     fn get_bits(&mut self, count: u8) -> Option<u16> {
-        if count > 15 {
-            return None;
-        }
+        assert!(count < 16);
 
         // If we aren't able to get COUNT bits, suspend immediately, because
         // we don't track how many bits of COUNT we've accumulated before
         // suspend.
-        if self.input_size == 0 && self.bit_index < (1 << (count - 1)) {
+        if (((self.input_size - self.input_index) * 8) + self.bit_index as usize) < count as usize {
             return None;
         }
 
-        let mut accumulator: u16 = 0;
-        let mut i: u8 = 0;
+        // Get the current byte in the accumulator
+        let mut accumulator: u16 = self.current_byte as u16;
+        // mask upper bits (already consumed)
+        accumulator &= (1 << self.bit_index) - 1;
 
-        while i < count {
-            if self.bit_index == 0 {
-                if self.input_size == 0 {
-                    return None;
-                }
+        if count < self.bit_index {
+            // enough bits left in the current_byte
+            // shift accumulator right
+            accumulator >>= self.bit_index - count;
+            // update bit_index
+            self.bit_index -= count;
+        } else if count == self.bit_index {
+            // We are consuming exactly the bits left in current_byte
+            if self.input_size == self.input_index {
+                // we should load the next byte but the buffer is consumed
+                // So let's set the bit_index to 0 to show there is nothning
+                // left to consume.
+                self.bit_index = 0;
+                // This will be set to 8 on next sink
+            } else {
+                // load next byte.
                 self.current_byte = self.input_buffer[self.input_index];
+                // increase the consumed index
                 self.input_index += 1;
-                if self.input_index == self.input_size {
-                    // input_buffer is consumed
-                    self.input_index = 0;
-                    self.input_size = 0;
-                }
-                self.bit_index = 0x80;
+                // reset the bit index
+                self.bit_index = 8;
             }
-            accumulator <<= 1;
-            if self.current_byte & self.bit_index != 0 {
-                accumulator |= 0x1;
-            }
-            self.bit_index >>= 1;
-            i += 1;
+        } else if count <= self.bit_index + 8 {
+            // we need to take some bits from next byte
+            // shift accumulator (8 bits) left
+            accumulator <<= 8;
+            // consume next byte from the input buffer
+            self.current_byte = self.input_buffer[self.input_index];
+            // increase the consumed index
+            self.input_index += 1;
+            // add the byte read to the accumulator
+            accumulator += self.current_byte as u16;
+            // update bit_index
+            self.bit_index += 8 - count;
+            // shift accumulator right
+            accumulator >>= self.bit_index;
+        } else {
+            // we need to take bits from the next 2 bytes
+            // shift accumulator (8 bits) left
+            accumulator <<= 8;
+            // consume next byte from the input buffer
+            self.current_byte = self.input_buffer[self.input_index];
+            // increase the consumed index
+            self.input_index += 1;
+            // add byte read to the accumulator
+            accumulator += self.current_byte as u16;
+            // Consume one more byte
+            self.current_byte = self.input_buffer[self.input_index];
+            // increase the consumed index
+            self.input_index += 1;
+            // update bit_index
+            self.bit_index += 16 - count;
+            // shift accumulator left to be able to add bits
+            accumulator <<= 8 - self.bit_index;
+            // Add the missing (shifted) bits
+            accumulator += self.current_byte as u16 >> self.bit_index;
+        }
+
+        // if we reach the end of buffer, reset input_index and input_size
+        if self.input_index == self.input_size {
+            self.input_index = 0;
+            self.input_size = 0;
+            // Next call to poll will likely return None (depending on
+            // bit_index) and require a call to sink to continue.
         }
 
         Some(accumulator)
