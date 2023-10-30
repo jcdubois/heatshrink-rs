@@ -11,12 +11,12 @@ heatshrink parameters are hardcoded to window_sz2 = 8 and lookahead_sz2 = 4.
 ## Key Features:
 
 - **Low memory usage:**
-    It is useful for many general cases with < 300 bytes.
+    It is useful for many general cases with small memory.
 - **Incremental, bounded CPU use:**
     You can chew on input data in arbitrarily tiny bites.
     This is a useful property in hard real-time environments.
 - **For now you are limited to the static version because of no_std:**
-    The library doesn't impose any constraints on memory management.
+    No dynamic allocation is used.
 - **ISC license:**
     You can use it freely, even for commercial purposes.
 
