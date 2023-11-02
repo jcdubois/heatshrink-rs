@@ -55,6 +55,8 @@ fn encode(mut input_file: &File, mut output_file: &File) {
 
     let mut enc: heatshrink::encoder::HeatshrinkEncoder = Default::default();
 
+    let mut output_bytes_processed = 0;
+
     loop {
         let input_bytes_read = input_file.read(&mut input_buffer[0..]).unwrap();
 
@@ -79,30 +81,22 @@ fn encode(mut input_file: &File, mut output_file: &File) {
                 }
             }
 
-            let mut output_bytes_processed = 0;
-
             loop {
                 // process the current input buffer
-                match enc.poll(&mut output_buffer[0..]) {
-                    (heatshrink::HSpollRes::PollMore, x) => {
-                        if x != 0 {
-                            output_bytes_processed = x;
-                            let _ = output_file
-                                .write(&output_buffer[0..output_bytes_processed])
-                                .unwrap();
-                        }
+                match enc.poll(&mut output_buffer[output_bytes_processed..]) {
+                    (heatshrink::HSpollRes::PollMore, segment_output_size) => {
+                        output_bytes_processed += segment_output_size;
+                        let _ = output_file
+                            .write(&output_buffer[0..output_bytes_processed])
+                            .unwrap();
+                        output_bytes_processed = 0;
                         // Some more data is avaialble in input_buffer.
                         // Let's loop.
                     }
-                    (heatshrink::HSpollRes::PollEmpty, x) => {
-                        if x != 0 {
-                            output_bytes_processed = x;
-                            let _ = output_file
-                                .write(&output_buffer[0..output_bytes_processed])
-                                .unwrap();
-                        }
+                    (heatshrink::HSpollRes::PollEmpty, segment_output_size) => {
+                        output_bytes_processed += segment_output_size;
                         // The input_buffer is consumed.
-                        // Exit the poll loop.
+                        // Exit the loop.
                         break;
                     }
                     (heatshrink::HSpollRes::PollErrorMisuse, _) => {
@@ -111,7 +105,13 @@ fn encode(mut input_file: &File, mut output_file: &File) {
                 }
             }
 
-            if input_bytes_read == 0 && output_bytes_processed == 0 {
+            if input_bytes_read == 0 {
+                if output_bytes_processed != 0 {
+                    let _ = output_file
+                        .write(&output_buffer[0..output_bytes_processed])
+                        .unwrap();
+                    output_bytes_processed = 0;
+                }
                 if let heatshrink::HSfinishRes::FinishDone = enc.finish() {
                     encoding_is_complete = true;
                     break;
