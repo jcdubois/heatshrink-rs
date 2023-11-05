@@ -10,11 +10,11 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.heatshrink]
+[dependencies.heatshrink-rs]
 path = ".."
 
 [features]
-heatshrink-use-index = ["heatshrink/heatshrink-use-index"]
+heatshrink-use-index = ["heatshrink-rs/heatshrink-use-index"]
 
 # Prevent this from interfering with workspaces
 [workspace]
