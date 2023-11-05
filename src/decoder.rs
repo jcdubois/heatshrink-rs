@@ -213,7 +213,7 @@ impl HeatshrinkDecoder {
             match self.get_bits(8) {
                 None => HSDstate::YieldLiteral, // input_buffer is consumed
                 Some(x) => {
-                    let c: u8 = (x & 0xff) as u8;
+                    let c: u8 = x;
                     let mask = self.output_buffer.len() - 1;
                     self.output_buffer[self.head_index & mask] = c;
                     self.head_index += 1;
@@ -230,7 +230,7 @@ impl HeatshrinkDecoder {
         match self.get_bits(0) {
             None => HSDstate::BackrefIndexMsb,
             Some(x) => {
-                self.output_index = (x << 8) as usize;
+                self.output_index = (x as usize) << 8;
                 HSDstate::BackrefIndexLsb
             }
         }
@@ -252,7 +252,7 @@ impl HeatshrinkDecoder {
         match self.get_bits(HEATSHRINK_LOOKAHEAD_BITS) {
             None => HSDstate::BackrefCountLsb,
             Some(x) => {
-                self.output_count |= x;
+                self.output_count |= x as u16;
                 self.output_count += 1;
                 HSDstate::YieldBackref
             }
@@ -263,22 +263,21 @@ impl HeatshrinkDecoder {
         if output_info.can_take_byte() {
             let mut i: usize = 0;
             let mut count = output_info.remaining_free_size();
-            let mask = self.output_buffer.len() - 1;
+            let len = self.output_buffer.len();
+            let mut head_index = self.head_index;
+            let output_index = self.output_index;
 
             if usize::from(self.output_count) < count {
                 count = usize::from(self.output_count);
             }
 
-            let mut head_index = self.head_index;
-            let output_index = self.output_index;
-
             while i < count {
                 let c = if output_index > head_index {
                     0
                 } else {
-                    self.output_buffer[(head_index - output_index) & mask]
+                    self.output_buffer[(head_index - output_index) % len]
                 };
-                self.output_buffer[head_index & mask] = c;
+                self.output_buffer[head_index % len] = c;
                 output_info.push_byte(c);
                 head_index += 1;
                 i += 1;
@@ -297,8 +296,8 @@ impl HeatshrinkDecoder {
     /// Get the next COUNT bits from the input buffer, saving incremental
     /// progress. Returns None on end of input, or if more than 15 bits are
     /// requested.
-    fn get_bits(&mut self, count: u8) -> Option<u16> {
-        assert!(count < 16);
+    fn get_bits(&mut self, count: u8) -> Option<u8> {
+        assert!(count <= 8);
 
         // If we aren't able to get COUNT bits, suspend immediately, because
         // we don't track how many bits of COUNT we've accumulated before
@@ -334,7 +333,7 @@ impl HeatshrinkDecoder {
                 // reset the bit index
                 self.bit_index = 8;
             }
-        } else if count <= self.bit_index + 8 {
+        } else {
             // we need to take some bits from next byte
             // shift accumulator (8 bits) left
             accumulator <<= 8;
@@ -348,26 +347,6 @@ impl HeatshrinkDecoder {
             self.bit_index += 8 - count;
             // shift accumulator right
             accumulator >>= self.bit_index;
-        } else {
-            // we need to take bits from the next 2 bytes
-            // shift accumulator (8 bits) left
-            accumulator <<= 8;
-            // consume next byte from the input buffer
-            self.current_byte = self.input_buffer[self.input_index];
-            // increase the consumed index
-            self.input_index += 1;
-            // add byte read to the accumulator
-            accumulator += self.current_byte as u16;
-            // Consume one more byte
-            self.current_byte = self.input_buffer[self.input_index];
-            // increase the consumed index
-            self.input_index += 1;
-            // update bit_index
-            self.bit_index += 16 - count;
-            // shift accumulator left to be able to add bits
-            accumulator <<= 8 - self.bit_index;
-            // Add the missing (shifted) bits
-            accumulator += self.current_byte as u16 >> self.bit_index;
         }
 
         // if we reach the end of buffer, reset input_index and input_size
@@ -378,7 +357,7 @@ impl HeatshrinkDecoder {
             // bit_index) and require a call to sink to continue.
         }
 
-        Some(accumulator)
+        Some(accumulator as u8)
     }
 
     /// Finish the uncompress stream
