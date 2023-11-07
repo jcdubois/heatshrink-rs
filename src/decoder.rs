@@ -214,8 +214,8 @@ impl HeatshrinkDecoder {
                 None => HSDstate::YieldLiteral, // input_buffer is consumed
                 Some(x) => {
                     let c: u8 = x;
-                    let mask = self.output_buffer.len() - 1;
-                    self.output_buffer[self.head_index & mask] = c;
+                    let len = self.output_buffer.len();
+                    self.output_buffer[self.head_index % len] = c;
                     self.head_index += 1;
                     output_info.push_byte(c);
                     HSDstate::TagBit
@@ -262,14 +262,15 @@ impl HeatshrinkDecoder {
     fn st_yield_backref(&mut self, output_info: &mut OutputInfo) -> HSDstate {
         if output_info.can_take_byte() {
             let mut i: usize = 0;
-            let mut count = output_info.remaining_free_size();
             let len = self.output_buffer.len();
             let mut head_index = self.head_index;
             let output_index = self.output_index;
 
-            if usize::from(self.output_count) < count {
-                count = usize::from(self.output_count);
-            }
+            let count = if output_info.remaining_free_size() > usize::from(self.output_count) {
+                usize::from(self.output_count)
+            } else {
+                output_info.remaining_free_size()
+            };
 
             while i < count {
                 let c = if output_index > head_index {
@@ -277,8 +278,8 @@ impl HeatshrinkDecoder {
                 } else {
                     self.output_buffer[(head_index - output_index) % len]
                 };
-                self.output_buffer[head_index % len] = c;
                 output_info.push_byte(c);
+                self.output_buffer[head_index % len] = c;
                 head_index += 1;
                 i += 1;
             }
@@ -294,8 +295,7 @@ impl HeatshrinkDecoder {
     }
 
     /// Get the next COUNT bits from the input buffer, saving incremental
-    /// progress. Returns None on end of input, or if more than 15 bits are
-    /// requested.
+    /// progress. Returns None on end of input.
     fn get_bits(&mut self, count: u8) -> Option<u8> {
         assert!(count <= 8);
 
@@ -307,9 +307,9 @@ impl HeatshrinkDecoder {
         }
 
         // Get the current byte in the accumulator
-        let mut accumulator: u16 = self.current_byte as u16;
+        let mut accumulator = self.current_byte as u16;
         // mask upper bits (already consumed)
-        accumulator &= (1 << self.bit_index) - 1;
+        accumulator %= 1 << self.bit_index;
 
         if count < self.bit_index {
             // enough bits left in the current_byte
@@ -334,6 +334,7 @@ impl HeatshrinkDecoder {
                 self.bit_index = 8;
             }
         } else {
+            // count > self.bit_index
             // we need to take some bits from next byte
             // shift accumulator (8 bits) left
             accumulator <<= 8;
