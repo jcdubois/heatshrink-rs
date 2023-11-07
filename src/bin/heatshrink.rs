@@ -2,7 +2,6 @@ use clap::{ArgGroup, Parser};
 use std::fs::File;
 use std::io::{Read, Write};
 
-//const HEATSHRINK_APP_BUFFER_SIZE: usize = 4096;
 const HEATSHRINK_APP_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Parser)] // requires `derive` feature
