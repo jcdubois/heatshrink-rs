@@ -166,11 +166,11 @@ impl HeatshrinkEncoder {
         self.bit_index = 8;
         self.state = HSEstate::NotFull;
         // memset self.buffer to 0
-        self.input_buffer.iter_mut().for_each(|m| *m = 0);
+        self.input_buffer.fill(0);
         #[cfg(feature = "heatshrink-use-index")]
         {
             // memset self.search_index to 0
-            self.search_index.iter_mut().for_each(|m| *m = None);
+            self.search_index.fill(None);
         }
     }
 

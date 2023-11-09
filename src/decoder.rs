@@ -116,8 +116,8 @@ impl HeatshrinkDecoder {
         self.bit_index = 0;
         self.state = HSDstate::TagBit;
         // memset self.buffer to 0
-        self.input_buffer.iter_mut().for_each(|m| *m = 0);
-        self.output_buffer.iter_mut().for_each(|m| *m = 0);
+        self.input_buffer.fill(0);
+        self.output_buffer.fill(0);
     }
 
     /// Add an input buffer to be processed/uncompressed
