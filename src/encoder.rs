@@ -285,12 +285,12 @@ impl HeatshrinkEncoder {
 
     fn st_step_search(&mut self) -> HSEstate {
         if self.match_scan_index
+            + (if self.is_finishing() {
+                1
+            } else {
+                self.get_lookahead_size()
+            })
             > self.input_size
-                - (if self.is_finishing() {
-                    1
-                } else {
-                    self.get_lookahead_size()
-                })
         {
             if self.is_finishing() {
                 HSEstate::FlushBits
