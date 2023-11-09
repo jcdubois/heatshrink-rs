@@ -27,7 +27,7 @@ pub struct HeatshrinkEncoder {
     input_size: usize,
     match_scan_index: usize,
     match_length: usize,
-    match_pos: usize,
+    match_position: usize,
     outgoing_bits: u16,
     outgoing_bits_count: u8,
     flags: u8,
@@ -44,7 +44,7 @@ pub struct HeatshrinkEncoder {
     input_size: usize,
     match_scan_index: usize,
     match_length: usize,
-    match_pos: usize,
+    match_position: usize,
     outgoing_bits: u16,
     outgoing_bits_count: u8,
     flags: u8,
@@ -123,7 +123,7 @@ impl HeatshrinkEncoder {
                 input_size: 0,
                 match_scan_index: 0,
                 match_length: 0,
-                match_pos: 0,
+                match_position: 0,
                 outgoing_bits: 0,
                 outgoing_bits_count: 0,
                 flags: 0,
@@ -141,7 +141,7 @@ impl HeatshrinkEncoder {
                 input_size: 0,
                 match_scan_index: 0,
                 match_length: 0,
-                match_pos: 0,
+                match_position: 0,
                 outgoing_bits: 0,
                 outgoing_bits_count: 0,
                 flags: 0,
@@ -158,7 +158,7 @@ impl HeatshrinkEncoder {
         self.input_size = 0;
         self.match_scan_index = 0;
         self.match_length = 0;
-        self.match_pos = 0;
+        self.match_position = 0;
         self.outgoing_bits = 0;
         self.outgoing_bits_count = 0;
         self.flags = 0;
@@ -169,7 +169,7 @@ impl HeatshrinkEncoder {
         self.input_buffer.fill(0);
         #[cfg(feature = "heatshrink-use-index")]
         {
-            // memset self.search_index to 0
+            // memset self.search_index to None
             self.search_index.fill(None);
         }
     }
@@ -300,19 +300,22 @@ impl HeatshrinkEncoder {
         } else {
             let end = self.get_input_offset() + self.match_scan_index;
             let start = end - self.get_input_buffer_size();
-            let mut max_possible = self.get_lookahead_size();
-            if (self.input_size - self.match_scan_index) < max_possible {
-                max_possible = self.input_size - self.match_scan_index;
-            }
+            let max_possible =
+                if (self.input_size - self.match_scan_index) < self.get_lookahead_size() {
+                    self.input_size - self.match_scan_index
+                } else {
+                    self.get_lookahead_size()
+                };
+
             match self.find_longest_match(start, end, max_possible) {
                 None => {
                     self.match_scan_index += 1;
                     self.match_length = 0;
                 }
-                Some(match_pos) => {
-                    self.match_pos = match_pos.0;
-                    self.match_length = match_pos.1;
-                    assert!(self.match_pos <= 1 << HEATSHRINK_WINDOWS_BITS);
+                Some(position_result) => {
+                    self.match_position = position_result.0;
+                    self.match_length = position_result.1;
+                    assert!(self.match_position <= 1 << HEATSHRINK_WINDOWS_BITS);
                 }
             }
             HSEstate::YieldTagBit
@@ -326,7 +329,7 @@ impl HeatshrinkEncoder {
                 HSEstate::YieldLiteral
             } else {
                 self.add_tag_bit(output_info, 0);
-                self.outgoing_bits = self.match_pos as u16 - 1;
+                self.outgoing_bits = self.match_position as u16 - 1;
                 self.outgoing_bits_count = 8;
                 HSEstate::YieldBrIndex
             }
@@ -415,7 +418,7 @@ impl HeatshrinkEncoder {
              * for the previous instances of every byte in the buffer.
              *
              * For example, if buf[200] == 'x', then index[200] will either
-             * be an offset i such that buf[i] == 'x', or a negative offset
+             * be an offset i such that buf[i] == 'x', or a None value
              * to indicate end-of-list. This significantly speeds up matching,
              * while only using sizeof(Option<u16>)*sizeof(buffer) bytes of
              * RAM.
@@ -449,23 +452,23 @@ impl HeatshrinkEncoder {
 
         #[cfg(not(feature = "heatshrink-use-index"))]
         {
-            let mut pos = end - 1;
+            let mut position = end - 1;
 
-            while pos >= start {
-                if (self.input_buffer[pos] == self.input_buffer[end])
-                    && (self.input_buffer[pos + match_maxlen]
+            while position >= start {
+                if (self.input_buffer[position] == self.input_buffer[end])
+                    && (self.input_buffer[position + match_maxlen]
                         == self.input_buffer[end + match_maxlen])
                 {
                     let mut len: usize = 1;
                     while len < maxlen {
-                        if self.input_buffer[pos + len] != self.input_buffer[end + len] {
+                        if self.input_buffer[position + len] != self.input_buffer[end + len] {
                             break;
                         }
                         len += 1;
                     }
                     if len > match_maxlen {
                         match_maxlen = len;
-                        match_index = pos;
+                        match_index = position;
                         if len == maxlen {
                             // don't keep searching
                             break;
@@ -473,40 +476,40 @@ impl HeatshrinkEncoder {
                     }
                 }
 
-                if pos == 0 {
+                if position == 0 {
                     break;
                 } else {
-                    pos -= 1;
+                    position -= 1;
                 }
             }
         }
 
         #[cfg(feature = "heatshrink-use-index")]
         {
-            let mut pos = end;
+            let mut position = end;
 
             loop {
-                match self.search_index[pos] {
+                match self.search_index[position] {
                     None => {
                         break;
                     }
                     Some(x) => {
-                        pos = x;
+                        position = x;
 
-                        if pos < start {
+                        if position < start {
                             break;
                         }
 
                         let mut len: usize = 1;
 
-                        if self.input_buffer[pos + match_maxlen]
+                        if self.input_buffer[position + match_maxlen]
                             != self.input_buffer[end + match_maxlen]
                         {
                             continue;
                         }
 
                         while len < maxlen {
-                            if self.input_buffer[pos + len] != self.input_buffer[end + len] {
+                            if self.input_buffer[position + len] != self.input_buffer[end + len] {
                                 break;
                             }
                             len += 1;
@@ -514,7 +517,7 @@ impl HeatshrinkEncoder {
 
                         if len > match_maxlen {
                             match_maxlen = len;
-                            match_index = pos;
+                            match_index = position;
                             if len == maxlen {
                                 // don't keep searching
                                 break;
@@ -565,16 +568,14 @@ impl HeatshrinkEncoder {
         assert!(count > 0 && count <= 8);
 
         if count >= self.bit_index {
-            let mut shift: u8 = count - self.bit_index;
-            let tmp_byte: u8 = self.current_byte | bits >> shift;
+            let shift = count - self.bit_index;
+            let tmp_byte = self.current_byte | bits >> shift;
             output_info.push_byte(tmp_byte);
+            self.bit_index = 8 - shift;
             if shift == 0 {
-                self.bit_index = 8;
                 self.current_byte = 0;
             } else {
-                shift = 8 - shift;
-                self.bit_index = shift;
-                self.current_byte = bits << shift;
+                self.current_byte = bits << self.bit_index;
             }
         } else {
             self.bit_index -= count;
