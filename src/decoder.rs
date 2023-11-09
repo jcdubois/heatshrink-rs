@@ -7,6 +7,8 @@ use super::HEATSHRINK_INPUT_BUFFER_SIZE;
 use super::HEATSHRINK_LOOKAHEAD_BITS;
 use super::HEATSHRINK_WINDOWS_BITS;
 
+use core::cmp::Ordering;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum HSDstate {
     TagBit,          /* tag bit */
@@ -311,43 +313,47 @@ impl HeatshrinkDecoder {
         // mask upper bits (already consumed)
         accumulator %= 1 << self.bit_index;
 
-        if count < self.bit_index {
-            // enough bits left in the current_byte
-            // shift accumulator right
-            accumulator >>= self.bit_index - count;
-            // update bit_index
-            self.bit_index -= count;
-        } else if count == self.bit_index {
-            // We are consuming exactly the bits left in current_byte
-            if self.input_size == self.input_index {
-                // we should load the next byte but the buffer is consumed
-                // So let's set the bit_index to 0 to show there is nothning
-                // left to consume.
-                self.bit_index = 0;
-                // This will be set to 8 on next sink
-            } else {
-                // load next byte.
+        match count.cmp(&self.bit_index) {
+            Ordering::Less => {
+                // enough bits left in the current_byte
+                // shift accumulator right
+                accumulator >>= self.bit_index - count;
+                // update bit_index
+                self.bit_index -= count;
+            }
+            Ordering::Equal => {
+                // We are consuming exactly the bits left in current_byte
+                if self.input_size == self.input_index {
+                    // we should load the next byte but the buffer is
+                    // consumed. So let's set the bit_index to 0 to show
+                    // there is nothning left to consume.
+                    self.bit_index = 0;
+                    // This will be set to 8 on next sink
+                } else {
+                    // load next byte.
+                    self.current_byte = self.input_buffer[self.input_index];
+                    // increase the consumed index
+                    self.input_index += 1;
+                    // reset the bit index
+                    self.bit_index = 8;
+                }
+            }
+            Ordering::Greater => {
+                // count > self.bit_index
+                // we need to take some bits from next byte
+                // shift accumulator (8 bits) left
+                accumulator <<= 8;
+                // consume next byte from the input buffer
                 self.current_byte = self.input_buffer[self.input_index];
                 // increase the consumed index
                 self.input_index += 1;
-                // reset the bit index
-                self.bit_index = 8;
+                // add the byte read to the accumulator
+                accumulator += self.current_byte as u16;
+                // update bit_index
+                self.bit_index += 8 - count;
+                // shift accumulator right
+                accumulator >>= self.bit_index;
             }
-        } else {
-            // count > self.bit_index
-            // we need to take some bits from next byte
-            // shift accumulator (8 bits) left
-            accumulator <<= 8;
-            // consume next byte from the input buffer
-            self.current_byte = self.input_buffer[self.input_index];
-            // increase the consumed index
-            self.input_index += 1;
-            // add the byte read to the accumulator
-            accumulator += self.current_byte as u16;
-            // update bit_index
-            self.bit_index += 8 - count;
-            // shift accumulator right
-            accumulator >>= self.bit_index;
         }
 
         // if we reach the end of buffer, reset input_index and input_size
