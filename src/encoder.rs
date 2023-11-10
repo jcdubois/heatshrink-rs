@@ -489,40 +489,32 @@ impl HeatshrinkEncoder {
         {
             let mut position = end;
 
-            loop {
-                match self.search_index[position] {
-                    Some(next_position) => {
-                        position = next_position;
+            while let Some(next_position) = self.search_index[position] {
+                position = next_position;
 
-                        if position < start {
+                if position < start {
+                    break;
+                } else if self.input_buffer[position + match_maxlen]
+                    != self.input_buffer[end + match_maxlen]
+                {
+                    continue;
+                } else {
+                    let mut len = 1;
+
+                    while len < maxlen {
+                        if self.input_buffer[position + len] != self.input_buffer[end + len] {
                             break;
-                        } else if self.input_buffer[position + match_maxlen]
-                            != self.input_buffer[end + match_maxlen]
-                        {
-                            continue;
-                        } else {
-                            let mut len = 1;
-
-                            while len < maxlen {
-                                if self.input_buffer[position + len] != self.input_buffer[end + len]
-                                {
-                                    break;
-                                }
-                                len += 1;
-                            }
-
-                            if len > match_maxlen {
-                                match_maxlen = len;
-                                match_index = position;
-                                if len == maxlen {
-                                    // don't keep searching
-                                    break;
-                                }
-                            }
                         }
+                        len += 1;
                     }
-                    None => {
-                        break;
+
+                    if len > match_maxlen {
+                        match_maxlen = len;
+                        match_index = position;
+                        if len == maxlen {
+                            // don't keep searching
+                            break;
+                        }
                     }
                 }
             }
