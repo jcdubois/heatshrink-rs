@@ -222,9 +222,9 @@ impl HeatshrinkEncoder {
             let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
 
             loop {
-                let in_state = self.state;
+                let previous_state = self.state;
 
-                match in_state {
+                match previous_state {
                     HSEstate::NotFull => {
                         return (HSpollRes::PollEmpty, output_size);
                     }
@@ -261,7 +261,7 @@ impl HeatshrinkEncoder {
 
                 // If the current state cannot advance, check if output
                 // buffer is exhausted.
-                if self.state == in_state && !output_info.can_take_byte() {
+                if self.state == previous_state && !output_info.can_take_byte() {
                     return (HSpollRes::PollMore, output_size);
                 }
             }
@@ -301,7 +301,7 @@ impl HeatshrinkEncoder {
             let end = self.get_input_offset() + self.match_scan_index;
             let start = end - self.get_input_buffer_size();
             let max_possible =
-                if (self.input_size - self.match_scan_index) < self.get_lookahead_size() {
+                if self.input_size < (self.get_lookahead_size() + self.match_scan_index) {
                     self.input_size - self.match_scan_index
                 } else {
                     self.get_lookahead_size()
@@ -459,13 +459,14 @@ impl HeatshrinkEncoder {
                     && (self.input_buffer[position + match_maxlen]
                         == self.input_buffer[end + match_maxlen])
                 {
-                    let mut len: usize = 1;
+                    let mut len = 1;
                     while len < maxlen {
                         if self.input_buffer[position + len] != self.input_buffer[end + len] {
                             break;
                         }
                         len += 1;
                     }
+
                     if len > match_maxlen {
                         match_maxlen = len;
                         match_index = position;
@@ -490,39 +491,38 @@ impl HeatshrinkEncoder {
 
             loop {
                 match self.search_index[position] {
-                    None => {
-                        break;
-                    }
-                    Some(x) => {
-                        position = x;
+                    Some(next_position) => {
+                        position = next_position;
 
                         if position < start {
                             break;
-                        }
-
-                        let mut len: usize = 1;
-
-                        if self.input_buffer[position + match_maxlen]
+                        } else if self.input_buffer[position + match_maxlen]
                             != self.input_buffer[end + match_maxlen]
                         {
                             continue;
-                        }
+                        } else {
+                            let mut len = 1;
 
-                        while len < maxlen {
-                            if self.input_buffer[position + len] != self.input_buffer[end + len] {
-                                break;
+                            while len < maxlen {
+                                if self.input_buffer[position + len] != self.input_buffer[end + len]
+                                {
+                                    break;
+                                }
+                                len += 1;
                             }
-                            len += 1;
-                        }
 
-                        if len > match_maxlen {
-                            match_maxlen = len;
-                            match_index = position;
-                            if len == maxlen {
-                                // don't keep searching
-                                break;
+                            if len > match_maxlen {
+                                match_maxlen = len;
+                                match_index = position;
+                                if len == maxlen {
+                                    // don't keep searching
+                                    break;
+                                }
                             }
                         }
+                    }
+                    None => {
+                        break;
                     }
                 }
             }
@@ -543,16 +543,14 @@ impl HeatshrinkEncoder {
     }
 
     fn push_outgoing_bits(&mut self, output_info: &mut OutputInfo) -> u8 {
-        let count: u8;
-        let bits: u8;
-
-        if self.outgoing_bits_count > 8 {
-            count = 8;
-            bits = (self.outgoing_bits >> (self.outgoing_bits_count - 8)) as u8;
+        let (count, bits) = if self.outgoing_bits_count > 8 {
+            (
+                8,
+                self.outgoing_bits as u8 >> (self.outgoing_bits_count - 8),
+            )
         } else {
-            count = self.outgoing_bits_count;
-            bits = self.outgoing_bits as u8;
-        }
+            (self.outgoing_bits_count, self.outgoing_bits as u8)
+        };
 
         if count > 0 {
             self.push_bits(count, bits, output_info);
@@ -584,20 +582,19 @@ impl HeatshrinkEncoder {
     }
 
     fn push_literal_byte(&mut self, output_info: &mut OutputInfo) {
-        let input_offset = self.match_scan_index - 1;
-        let c = self.input_buffer[self.get_input_offset() + input_offset];
-        self.push_bits(8, c, output_info);
+        self.push_bits(
+            8,
+            self.input_buffer[self.get_input_offset() + self.match_scan_index - 1],
+            output_info,
+        );
     }
 
     fn save_backlog(&mut self) {
         // Copy processed data to beginning of buffer, so it can be used for
         // future matches. Don't bother checking whether the input is less
         // than the maximum size, because if it isn't, we're done anyway.
-        let remaining_size = self.get_input_buffer_size() - self.match_scan_index; // unprocessed bytes
-        let shift_size = self.get_input_buffer_size() + remaining_size;
-        self.input_buffer
-            .copy_within(self.match_scan_index..self.match_scan_index + shift_size, 0);
+        self.input_buffer.copy_within(self.match_scan_index.., 0);
+        self.input_size -= self.match_scan_index;
         self.match_scan_index = 0;
-        self.input_size -= self.get_input_buffer_size() - remaining_size;
     }
 }

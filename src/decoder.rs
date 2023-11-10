@@ -161,9 +161,9 @@ impl HeatshrinkDecoder {
             let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
 
             loop {
-                let in_state = self.state;
+                let previous_state = self.state;
 
-                match in_state {
+                match previous_state {
                     HSDstate::TagBit => {
                         self.state = self.st_tag_bit();
                     }
@@ -186,7 +186,7 @@ impl HeatshrinkDecoder {
 
                 // If the current state cannot advance, check if input or
                 // output buffer are exhausted.
-                if self.state == in_state {
+                if self.state == previous_state {
                     if output_info.can_take_byte() {
                         return (HSpollRes::PollEmpty, output_size);
                     } else {
@@ -263,7 +263,6 @@ impl HeatshrinkDecoder {
 
     fn st_yield_backref(&mut self, output_info: &mut OutputInfo) -> HSDstate {
         if output_info.can_take_byte() {
-            let mut i: usize = 0;
             let len = self.output_buffer.len();
             let mut head_index = self.head_index;
             let output_index = self.output_index;
@@ -274,7 +273,9 @@ impl HeatshrinkDecoder {
                 output_info.remaining_free_size()
             };
 
-            while i < count {
+            let index_limit = head_index + count;
+
+            while head_index < index_limit {
                 let c = if output_index > head_index {
                     0
                 } else {
@@ -283,7 +284,6 @@ impl HeatshrinkDecoder {
                 output_info.push_byte(c);
                 self.output_buffer[head_index % len] = c;
                 head_index += 1;
-                i += 1;
             }
 
             self.head_index = head_index;
