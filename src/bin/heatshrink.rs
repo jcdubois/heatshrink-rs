@@ -17,9 +17,25 @@ struct Cli {
     #[clap(
         short = 'v',
         long = "verbose",
-        help = "Print input & output sizes, compression ratio, etc."
+        help = "Print input & output sizes, compression ratio, etc"
     )]
     verbose: bool,
+
+    #[clap(
+        short = 'w',
+        long = "window",
+        help = "Base-2 log of LZSS sliding window size",
+        default_value_t = 8
+    )]
+    size: u8,
+
+    #[clap(
+        short = 'l',
+        long = "length",
+        help = "Number of bits used for back-reference lengths",
+        default_value_t = 4
+    )]
+    bits: u8,
 
     /// some regular input
     #[clap(group = "input")]
@@ -207,6 +223,14 @@ fn decode(mut input_file: &File, mut output_file: &File) {
 fn main() {
     // parse the command line parameters
     let args = Cli::parse();
+
+    if args.size != 8 {
+        panic!("For now only the default value [8] is supported for window size");
+    }
+
+    if args.bits != 4 {
+        panic!("For now only the dafault value [4] is supported for back-reference length");
+    }
 
     // Open input file for read
     let input_file = File::open(args.input_file.as_ref().unwrap()).unwrap();
