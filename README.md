@@ -1,4 +1,4 @@
-# heatshrink_embedded
+# heatshrink-rs
 Minimal no_std implementation of Heatshrink compression &amp; decompression
 for embedded systems
 
@@ -7,6 +7,8 @@ at https://github.com/atomicobject/heatshrink.
 
 The port is limited to the "static" version of the C library which means
 heatshrink parameters are hardcoded to window_sz2 = 8 and lookahead_sz2 = 4.
+
+It is not (yet?) possible to choose its own compression parameters.
 
 ## Key Features:
 
