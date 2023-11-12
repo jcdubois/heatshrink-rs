@@ -1,5 +1,7 @@
 use clap::{ArgGroup, Parser};
 use std::fs::File;
+use std::io;
+use std::io::{BufReader, BufWriter};
 use std::io::{Read, Write};
 
 const HEATSHRINK_APP_BUFFER_SIZE: usize = 64 * 1024;
@@ -46,27 +48,36 @@ struct Cli {
     output_file: Option<String>,
 }
 
-fn report(file_name: &String, input_file: &File, output_file: &File) {
-    // size of the input file
-    let input_len = input_file.metadata().unwrap().len();
-    // size of the output file
-    let output_len = output_file.metadata().unwrap().len();
-
-    println!(
-        "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
-        file_name,
-        100.0 - (100.0 * output_len as f32) / input_len as f32,
-        input_len,
-        output_len,
-        heatshrink::HEATSHRINK_WINDOWS_BITS,
-        heatshrink::HEATSHRINK_LOOKAHEAD_BITS
-    );
+fn report(use_stdout: bool, file_name: &String, input_len: usize, output_len: usize) {
+    if use_stdout {
+        println!(
+            "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
+            file_name,
+            100.0 - (100.0 * output_len as f32) / input_len as f32,
+            input_len,
+            output_len,
+            heatshrink::HEATSHRINK_WINDOWS_BITS,
+            heatshrink::HEATSHRINK_LOOKAHEAD_BITS
+        );
+    } else {
+        eprintln!(
+            "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
+            file_name,
+            100.0 - (100.0 * output_len as f32) / input_len as f32,
+            input_len,
+            output_len,
+            heatshrink::HEATSHRINK_WINDOWS_BITS,
+            heatshrink::HEATSHRINK_LOOKAHEAD_BITS
+        );
+    }
 }
 
-fn encode(mut input_file: &File, mut output_file: &File) {
+fn encode(input_file: &mut Box<dyn Read>, output_file: &mut Box<dyn Write>) -> (usize, usize) {
     let mut input_buffer = [0u8; HEATSHRINK_APP_BUFFER_SIZE];
     let mut output_buffer = [0u8; HEATSHRINK_APP_BUFFER_SIZE];
     let mut encoding_is_complete = false;
+    let mut total_input_byte_size = 0;
+    let mut total_output_byte_size = 0;
 
     let mut enc: heatshrink::encoder::HeatshrinkEncoder = Default::default();
 
@@ -74,6 +85,8 @@ fn encode(mut input_file: &File, mut output_file: &File) {
 
     loop {
         let input_bytes_read = input_file.read(&mut input_buffer[0..]).unwrap();
+
+        total_input_byte_size += input_bytes_read;
 
         let mut input_bytes_processed = 0;
 
@@ -101,9 +114,14 @@ fn encode(mut input_file: &File, mut output_file: &File) {
                 match enc.poll(&mut output_buffer[output_bytes_processed..]) {
                     (heatshrink::HSpollRes::PollMore, segment_output_size) => {
                         output_bytes_processed += segment_output_size;
-                        let _ = output_file
-                            .write(&output_buffer[0..output_bytes_processed])
-                            .unwrap();
+                        let mut buf_begin = 0;
+                        while buf_begin != output_bytes_processed {
+                            let bytes_written = output_file
+                                .write(&output_buffer[buf_begin..output_bytes_processed])
+                                .unwrap();
+                            buf_begin += bytes_written;
+                        }
+                        total_output_byte_size += output_bytes_processed;
                         output_bytes_processed = 0;
                         // Some more data is avaialble in input_buffer.
                         // Let's loop.
@@ -122,9 +140,14 @@ fn encode(mut input_file: &File, mut output_file: &File) {
 
             if input_bytes_read == 0 {
                 if output_bytes_processed != 0 {
-                    let _ = output_file
-                        .write(&output_buffer[0..output_bytes_processed])
-                        .unwrap();
+                    let mut buf_begin = 0;
+                    while buf_begin != output_bytes_processed {
+                        let bytes_written = output_file
+                            .write(&output_buffer[buf_begin..output_bytes_processed])
+                            .unwrap();
+                        buf_begin += bytes_written;
+                    }
+                    total_output_byte_size += output_bytes_processed;
                     output_bytes_processed = 0;
                 }
                 if let heatshrink::HSfinishRes::FinishDone = enc.finish() {
@@ -142,11 +165,15 @@ fn encode(mut input_file: &File, mut output_file: &File) {
             break;
         }
     }
+
+    (total_input_byte_size, total_output_byte_size)
 }
 
-fn decode(mut input_file: &File, mut output_file: &File) {
+fn decode(input_file: &mut Box<dyn Read>, output_file: &mut Box<dyn Write>) -> (usize, usize) {
     let mut input_buffer = [0u8; HEATSHRINK_APP_BUFFER_SIZE];
     let mut output_buffer = [0u8; HEATSHRINK_APP_BUFFER_SIZE];
+    let mut total_input_byte_size = 0;
+    let mut total_output_byte_size = 0;
 
     let mut dec: heatshrink::decoder::HeatshrinkDecoder = Default::default();
 
@@ -155,13 +182,20 @@ fn decode(mut input_file: &File, mut output_file: &File) {
     loop {
         let input_bytes_read = input_file.read(&mut input_buffer).unwrap();
 
+        total_input_byte_size += input_bytes_read;
+
         if input_bytes_read == 0 {
             match dec.finish() {
                 heatshrink::HSfinishRes::FinishDone => {
                     if output_bytes_processed != 0 {
-                        let _ = output_file
-                            .write(&output_buffer[0..output_bytes_processed])
-                            .unwrap();
+                        let mut buf_begin = 0;
+                        while buf_begin != output_bytes_processed {
+                            let bytes_written = output_file
+                                .write(&output_buffer[buf_begin..output_bytes_processed])
+                                .unwrap();
+                            buf_begin += bytes_written;
+                        }
+                        total_output_byte_size += output_bytes_processed;
                     }
                     // the input input_buffer if empty now.
                     break;
@@ -197,9 +231,14 @@ fn decode(mut input_file: &File, mut output_file: &File) {
                 match dec.poll(&mut output_buffer[output_bytes_processed..]) {
                     (heatshrink::HSpollRes::PollMore, segment_output_size) => {
                         output_bytes_processed += segment_output_size;
-                        let _ = output_file
-                            .write(&output_buffer[0..output_bytes_processed])
-                            .unwrap();
+                        let mut buf_begin = 0;
+                        while buf_begin != output_bytes_processed {
+                            let bytes_written = output_file
+                                .write(&output_buffer[buf_begin..output_bytes_processed])
+                                .unwrap();
+                            buf_begin += bytes_written;
+                        }
+                        total_output_byte_size += output_bytes_processed;
                         output_bytes_processed = 0;
                         // Some more data is avaialble in input_buffer.
                         // Let's loop.
@@ -218,34 +257,57 @@ fn decode(mut input_file: &File, mut output_file: &File) {
             }
         }
     }
+    (total_input_byte_size, total_output_byte_size)
 }
 
 fn main() {
     // parse the command line parameters
     let args = Cli::parse();
 
-    if args.size != 8 {
-        panic!("For now only the default value [8] is supported for window size");
+    if args.size != heatshrink::HEATSHRINK_WINDOWS_BITS {
+        panic!(
+            "For now only the default value [{0:}] is supported for window size",
+            heatshrink::HEATSHRINK_WINDOWS_BITS
+        );
     }
 
-    if args.bits != 4 {
-        panic!("For now only the dafault value [4] is supported for back-reference length");
+    if args.bits != heatshrink::HEATSHRINK_LOOKAHEAD_BITS {
+        panic!(
+            "For now only the default value [{0:}] is supported for back-reference length",
+            heatshrink::HEATSHRINK_LOOKAHEAD_BITS
+        );
     }
 
     // Open input file for read
-    let input_file = File::open(args.input_file.as_ref().unwrap()).unwrap();
+    let mut input_file: Box<dyn Read> = match args.input_file {
+        // if no file name was provided use stdin instead
+        None => Box::new(BufReader::new(io::stdin())),
+        Some(ref filename) => Box::new(BufReader::new(File::open(filename).unwrap())),
+    };
     // Open output file for write
-    let output_file = File::create(args.output_file.as_ref().unwrap()).unwrap();
+    let mut output_file: Box<dyn Write> = match args.output_file {
+        // if no file name was provided use stdin instead
+        None => Box::new(BufWriter::new(io::stdout())),
+        Some(ref filename) => Box::new(BufWriter::new(File::create(filename).unwrap())),
+    };
 
     // Process the file
-    if args.encode {
-        encode(&input_file, &output_file);
+    let (input_size, output_size) = if args.encode {
+        encode(&mut input_file, &mut output_file)
     } else {
-        decode(&input_file, &output_file);
-    }
+        decode(&mut input_file, &mut output_file)
+    };
 
     // Output log if requested
     if args.verbose {
-        report(&args.input_file.unwrap(), &input_file, &output_file);
+        let file_name = match args.input_file {
+            None => "(stdin)".to_string(),
+            Some(ref filename) => filename.to_string(),
+        };
+        let use_stdout: bool = match args.output_file {
+            None => false,
+            _ => true,
+        };
+        report(use_stdout, &file_name, input_size, output_size);
     }
 }
