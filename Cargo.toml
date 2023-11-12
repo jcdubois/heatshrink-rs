@@ -1,12 +1,24 @@
 [workspace]
-members = [
-    "heatshrink-bin",
-    "heatshrink-lib",
-]
-resolver = "2"
+ members = [ "heatshrink-bin", "heatshrink-lib" ]
+ resolver = "2"
+
+[workspace.package]
+ authors = ["J-C Dubois"]
+ categories = ["compression", "embedded"]
+ description = "A minimal library implementing the heatshrink compression algorithm for no_std environments"
+ edition = "2021"
+ license = "ISC"
+ publish = false
+ readme = "README.md"
+ repository = "https://github.com/jcdubois/heatshrink-rs"
+ version = "0.4.1"
+
+[workspace.dependencies]
+ clap = { version = "4.4.8", features = ["derive"] }
+ hex-literal = "0.4.1"
 
 [profile.release]
-opt-level = 's'  # Optimize for size.
-lto = true # Link Time Optimization (LTO)
+ opt-level = 's'  # Optimize for size.
+ lto = true # Link Time Optimization (LTO)
 # codegen-units = 1 # Set this to 1 to allow for maximum size reduction optimizations:
 # panic = 'abort' # removes the need for this extra unwinding code.
