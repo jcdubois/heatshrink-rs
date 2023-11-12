@@ -48,9 +48,9 @@ struct Cli {
     output_file: Option<String>,
 }
 
-fn report(use_stdout: bool, file_name: &String, input_len: usize, output_len: usize) {
-    if use_stdout {
-        println!(
+fn report(use_stderr: bool, file_name: &String, input_len: usize, output_len: usize) {
+    if use_stderr {
+        eprintln!(
             "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
             file_name,
             100.0 - (100.0 * output_len as f32) / input_len as f32,
@@ -60,7 +60,7 @@ fn report(use_stdout: bool, file_name: &String, input_len: usize, output_len: us
             heatshrink::HEATSHRINK_LOOKAHEAD_BITS
         );
     } else {
-        eprintln!(
+        println!(
             "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
             file_name,
             100.0 - (100.0 * output_len as f32) / input_len as f32,
@@ -301,13 +301,14 @@ fn main() {
     // Output log if requested
     if args.verbose {
         let file_name = match args.input_file {
-            None => "(stdin)".to_string(),
+            None => "-".to_string(),
             Some(ref filename) => filename.to_string(),
         };
-        let use_stdout: bool = match args.output_file {
-            None => false,
-            _ => true,
-        };
-        report(use_stdout, &file_name, input_size, output_size);
+        report(
+            args.output_file.is_none(),
+            &file_name,
+            input_size,
+            output_size,
+        );
     }
 }
