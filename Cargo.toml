@@ -24,7 +24,7 @@ lto = true # Link Time Optimization (LTO)
 # panic = 'abort' # removes the need for this extra unwinding code.
 
 [dependencies]
-clap = { version = "4.4.7", features = ["derive"] }
+clap = { version = "4.4.8", features = ["derive"] }
 
 [dev-dependencies]
 hex-literal = "0.4.1"
