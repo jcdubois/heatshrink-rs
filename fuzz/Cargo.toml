@@ -1,6 +1,6 @@
 [package]
 name = "heatshrink-fuzz"
-version = "0.0.0"
+version = "0.4.1"
 publish = false
 edition = "2021"
 
@@ -10,11 +10,11 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.heatshrink-rs]
-path = ".."
+[dependencies.heatshrink-lib]
+path = "../heatshrink-lib"
 
 [features]
-heatshrink-use-index = ["heatshrink-rs/heatshrink-use-index"]
+heatshrink-use-index = ["heatshrink-lib/heatshrink-use-index"]
 
 # Prevent this from interfering with workspaces
 [workspace]

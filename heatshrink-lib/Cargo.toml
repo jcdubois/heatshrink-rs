@@ -1,0 +1,24 @@
+[package]
+name = "heatshrink-lib"
+version = "0.4.1"
+edition = "2021"
+authors = ["J-C Dubois"]
+description = "A minimal library implementing the heatshrink compression algorithm for no_std environments"
+readme = "../README.md"
+publish = false
+autobins = false
+license = "ISC"
+ 
+[lib]
+name = "heatshrink"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+hex-literal = "0.4.1"
+
+[features]
+default = ["heatshrink-use-index"]
+# Define features
+heatshrink-use-index = []

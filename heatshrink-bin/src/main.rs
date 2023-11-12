@@ -39,11 +39,11 @@ struct Cli {
     )]
     bits: u8,
 
-    /// some regular input
+    /// some regular input. It will default to stdin if unspecified.
     #[clap(group = "input")]
     input_file: Option<String>,
 
-    /// some regular output
+    /// some regular output. It will default to stdout if unspecified.
     #[clap(group = "output")]
     output_file: Option<String>,
 }

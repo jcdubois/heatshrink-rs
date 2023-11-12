@@ -1,0 +1,20 @@
+[package]
+name = "heatshrink-bin"
+version = "0.4.1"
+edition = "2021"
+authors = ["J-C Dubois"]
+description = "A program using the heatshrink library that cas be used to compress and decompresse data"
+readme = "../README.md"
+publish = false
+autobins = false
+license = "ISC"
+
+[[bin]]
+name = "heatshrink"
+path = "src/main.rs"
+
+[dependencies]
+heatshrink-lib = { version = "0.4.1", path = "../heatshrink-lib" }
+clap = { version = "4.4.8", features = ["derive"] }
+
+[dev-dependencies]
