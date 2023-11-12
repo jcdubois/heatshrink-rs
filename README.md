@@ -2,13 +2,14 @@
 Minimal no_std implementation of Heatshrink compression &amp; decompression
 for embedded systems
 
-This library is a port to RUST of the original heatshrink C library available
-at https://github.com/atomicobject/heatshrink.
+This library is a "crude" port to RUST of the original [heatshrink C library].
+
+[heatshrink C library]: https://github.com/atomicobject/heatshrink.
 
 The port is limited to the "static" version of the C library which means
 heatshrink parameters are hardcoded to window_sz2 = 8 and lookahead_sz2 = 4.
 
-It is not (yet?) possible to choose its own compression parameters.
+It is not (yet?) possible to choose its own compression parameters (mainly because it is a no_std library and therefore it does not support dynamic allocation).
 
 ## Key Features:
 
