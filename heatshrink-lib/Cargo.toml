@@ -9,7 +9,6 @@
  readme.workspace = true
  repository.workspace = true
  version.workspace = true
- autobins = false
  
 [lib]
  name = "heatshrink"
