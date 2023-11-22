@@ -105,10 +105,12 @@ fn encode(
                             (heatshrink::HSsinkRes::SinkFull, _) => {
                                 // Hum ... no data was added to the encoder because
                                 // the internal buffer was already full.
-                                panic!("Input buffer is full and unprocessed");
+                                eprintln!("Input buffer is full and unprocessed");
+                                return Err(io::ErrorKind::Other.into());
                             }
                             (heatshrink::HSsinkRes::SinkErrorMisuse, _) => {
-                                panic!("Error in HeatshrinkEncoder::sink()");
+                                eprintln!("Error in HeatshrinkEncoder::sink()");
+                                return Err(io::ErrorKind::Other.into());
                             }
                         }
                     }
@@ -141,7 +143,8 @@ fn encode(
                                 break;
                             }
                             (heatshrink::HSpollRes::PollErrorMisuse, _) => {
-                                panic!("Error in HeatshrinkEncoder::poll()");
+                                eprintln!("Error in HeatshrinkEncoder::poll()");
+                                return Err(io::ErrorKind::Other.into());
                             }
                         }
                     }
@@ -240,11 +243,13 @@ fn decode(
                         (heatshrink::HSsinkRes::SinkFull, _) => {
                             // Hum ... no data was added to the decoder because
                             // the internal buffer was already full.
-                            panic!("Input buffer is full and unprocessed");
+                            eprintln!("Input buffer is full and unprocessed");
+                            return Err(io::ErrorKind::Other.into());
                         }
                         (heatshrink::HSsinkRes::SinkErrorMisuse, _) => {
                             // We should abort/assert/return
-                            panic!("Error in HeatshrinkDecoder::sink()");
+                            eprintln!("Error in HeatshrinkDecoder::sink()");
+                            return Err(io::ErrorKind::Other.into());
                         }
                     }
 
@@ -277,7 +282,8 @@ fn decode(
                             }
                             (heatshrink::HSpollRes::PollErrorMisuse, _) => {
                                 // We should abort/assert/return
-                                panic!("Error in HeatshrinkDecoder::poll()");
+                                eprintln!("Error in HeatshrinkDecoder::poll()");
+                                return Err(io::ErrorKind::Other.into());
                             }
                         }
                     }
