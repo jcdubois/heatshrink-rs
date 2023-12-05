@@ -97,18 +97,18 @@ fn encode(
                 loop {
                     if input_bytes_read > 0 {
                         match enc.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
-                            (heatshrink::HSsinkRes::SinkOK, segment_input_size) => {
+                            heatshrink::HSsinkRes::SinkOK(segment_input_size) => {
                                 // Data has been added to the encoder.
                                 // Let's try to process/poll it
                                 input_bytes_processed += segment_input_size;
                             }
-                            (heatshrink::HSsinkRes::SinkFull, _) => {
+                            heatshrink::HSsinkRes::SinkFull => {
                                 // Hum ... no data was added to the encoder because
                                 // the internal buffer was already full.
                                 eprintln!("Input buffer is full and unprocessed");
                                 return Err(io::ErrorKind::Other.into());
                             }
-                            (heatshrink::HSsinkRes::SinkErrorMisuse, _) => {
+                            heatshrink::HSsinkRes::SinkErrorMisuse => {
                                 eprintln!("Error in HeatshrinkEncoder::sink()");
                                 return Err(io::ErrorKind::Other.into());
                             }
@@ -118,7 +118,7 @@ fn encode(
                     loop {
                         // process the current input buffer
                         match enc.poll(&mut output_buffer[output_bytes_processed..]) {
-                            (heatshrink::HSpollRes::PollMore, segment_output_size) => {
+                            heatshrink::HSpollRes::PollMore(segment_output_size) => {
                                 output_bytes_processed += segment_output_size;
                                 let mut buf_begin = 0;
                                 while buf_begin != output_bytes_processed {
@@ -136,13 +136,13 @@ fn encode(
                                 // Some more data is avaialble in input_buffer.
                                 // Let's loop.
                             }
-                            (heatshrink::HSpollRes::PollEmpty, segment_output_size) => {
+                            heatshrink::HSpollRes::PollEmpty(segment_output_size) => {
                                 output_bytes_processed += segment_output_size;
                                 // The input_buffer is consumed.
                                 // Exit the loop.
                                 break;
                             }
-                            (heatshrink::HSpollRes::PollErrorMisuse, _) => {
+                            heatshrink::HSpollRes::PollErrorMisuse => {
                                 eprintln!("Error in HeatshrinkEncoder::poll()");
                                 return Err(io::ErrorKind::Other.into());
                             }
@@ -235,18 +235,18 @@ fn decode(
 
                 while input_bytes_processed < input_bytes_read {
                     match dec.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
-                        (heatshrink::HSsinkRes::SinkOK, segment_input_size) => {
+                        heatshrink::HSsinkRes::SinkOK(segment_input_size) => {
                             // Data has been added to the decoder.
                             // Let's try to process/poll it
                             input_bytes_processed += segment_input_size;
                         }
-                        (heatshrink::HSsinkRes::SinkFull, _) => {
+                        heatshrink::HSsinkRes::SinkFull => {
                             // Hum ... no data was added to the decoder because
                             // the internal buffer was already full.
                             eprintln!("Input buffer is full and unprocessed");
                             return Err(io::ErrorKind::Other.into());
                         }
-                        (heatshrink::HSsinkRes::SinkErrorMisuse, _) => {
+                        heatshrink::HSsinkRes::SinkErrorMisuse => {
                             // We should abort/assert/return
                             eprintln!("Error in HeatshrinkDecoder::sink()");
                             return Err(io::ErrorKind::Other.into());
@@ -256,7 +256,7 @@ fn decode(
                     loop {
                         // process the current input buffer
                         match dec.poll(&mut output_buffer[output_bytes_processed..]) {
-                            (heatshrink::HSpollRes::PollMore, segment_output_size) => {
+                            heatshrink::HSpollRes::PollMore(segment_output_size) => {
                                 output_bytes_processed += segment_output_size;
                                 let mut buf_begin = 0;
                                 while buf_begin != output_bytes_processed {
@@ -274,13 +274,13 @@ fn decode(
                                 // Some more data is avaialble in input_buffer.
                                 // Let's loop.
                             }
-                            (heatshrink::HSpollRes::PollEmpty, segment_output_size) => {
+                            heatshrink::HSpollRes::PollEmpty(segment_output_size) => {
                                 output_bytes_processed += segment_output_size;
                                 // The input_buffer is consumed.
                                 // Exit the loop.
                                 break;
                             }
-                            (heatshrink::HSpollRes::PollErrorMisuse, _) => {
+                            heatshrink::HSpollRes::PollErrorMisuse => {
                                 // We should abort/assert/return
                                 eprintln!("Error in HeatshrinkDecoder::poll()");
                                 return Err(io::ErrorKind::Other.into());

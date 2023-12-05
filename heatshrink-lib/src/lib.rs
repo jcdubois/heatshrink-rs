@@ -30,7 +30,7 @@ pub enum HSsinkRes {
     /// Internal buffer is full, no data was added
     SinkFull,
     /// Data was correctly added to internal buffer
-    SinkOK,
+    SinkOK(usize),
 }
 
 /// Return code for poll function call
@@ -39,9 +39,9 @@ pub enum HSpollRes {
     /// Error in input parameters
     PollErrorMisuse,
     /// More data available to be processed
-    PollMore,
+    PollMore(usize),
     /// No more data to process
-    PollEmpty,
+    PollEmpty(usize),
 }
 
 /// Return code for finish function call
