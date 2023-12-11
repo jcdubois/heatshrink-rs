@@ -218,15 +218,14 @@ impl HeatshrinkEncoder {
         if output_buffer.is_empty() {
             HSpollRes::PollMore(0)
         } else {
-            let mut output_size: usize = 0;
-            let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
+            let mut output_info = OutputInfo::new(output_buffer);
 
             loop {
                 let previous_state = self.state;
 
                 match previous_state {
                     HSEstate::NotFull => {
-                        return HSpollRes::PollEmpty(output_size);
+                        return HSpollRes::PollEmpty(output_info.output_size);
                     }
                     HSEstate::Filled => {
                         self.do_indexing();
@@ -252,17 +251,17 @@ impl HeatshrinkEncoder {
                     }
                     HSEstate::FlushBits => {
                         self.state = self.st_flush_bit_buffer(&mut output_info);
-                        return HSpollRes::PollEmpty(output_size);
+                        return HSpollRes::PollEmpty(output_info.output_size);
                     }
                     HSEstate::Done => {
-                        return HSpollRes::PollEmpty(output_size);
+                        return HSpollRes::PollEmpty(output_info.output_size);
                     }
                 }
 
                 // If the current state cannot advance, check if output
                 // buffer is exhausted.
                 if self.state == previous_state && !output_info.can_take_byte() {
-                    return HSpollRes::PollMore(output_size);
+                    return HSpollRes::PollMore(output_info.output_size);
                 }
             }
         }

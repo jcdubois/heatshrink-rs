@@ -156,9 +156,7 @@ impl HeatshrinkDecoder {
         if output_buffer.is_empty() {
             HSpollRes::PollErrorMisuse
         } else {
-            let mut output_size: usize = 0;
-
-            let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
+            let mut output_info = OutputInfo::new(output_buffer);
 
             loop {
                 let previous_state = self.state;
@@ -188,9 +186,9 @@ impl HeatshrinkDecoder {
                 // output buffer are exhausted.
                 if self.state == previous_state {
                     if output_info.can_take_byte() {
-                        return HSpollRes::PollEmpty(output_size);
+                        return HSpollRes::PollEmpty(output_info.output_size);
                     } else {
-                        return HSpollRes::PollMore(output_size);
+                        return HSpollRes::PollMore(output_info.output_size);
                     }
                 }
             }
