@@ -73,8 +73,8 @@ impl<'a> OutputInfo<'a> {
     /// Create a new OutputInfo instance from provided parameters
     fn new(output_buffer: &'a mut [u8]) -> Self {
         OutputInfo {
-            output_buffer : output_buffer,
-            output_size : 0 as usize,
+            output_buffer,
+            output_size : 0_usize,
         }
     }
 
