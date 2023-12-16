@@ -44,11 +44,11 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
     while total_input_size < src.len() {
         // Fill the input buffer from the src buffer
         match dec.sink(&src[total_input_size..]) {
-            (HSsinkRes::SinkOK, segment_input_size) => {
+            HSsinkRes::SinkOK(segment_input_size) => {
                 total_input_size += segment_input_size;
             }
-            (HSsinkRes::SinkFull, _) => {}
-            (HSsinkRes::SinkErrorMisuse, _) => {
+            HSsinkRes::SinkFull => {}
+            HSsinkRes::SinkErrorMisuse => {
                 return Err(HSError::Internal);
             }
         }
@@ -58,13 +58,13 @@ pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
         } else {
             // process the current input buffer
             match dec.poll(&mut dst[total_output_size..]) {
-                (HSpollRes::PollMore, _) => {
+                HSpollRes::PollMore(_) => {
                     return Err(HSError::OutputFull);
                 }
-                (HSpollRes::PollEmpty, segment_output_size) => {
+                HSpollRes::PollEmpty(segment_output_size) => {
                     total_output_size += segment_output_size;
                 }
-                (HSpollRes::PollErrorMisuse, _) => {
+                HSpollRes::PollErrorMisuse => {
                     return Err(HSError::Internal);
                 }
             }
@@ -123,11 +123,11 @@ impl HeatshrinkDecoder {
     }
 
     /// Add an input buffer to be processed/uncompressed
-    pub fn sink(&mut self, input_buffer: &[u8]) -> (HSsinkRes, usize) {
+    pub fn sink(&mut self, input_buffer: &[u8]) -> HSsinkRes {
         let remaining_size = self.input_buffer.len() - self.input_size;
 
         if remaining_size == 0 {
-            return (HSsinkRes::SinkFull, 0);
+            return HSsinkRes::SinkFull;
         }
 
         let copy_size = if remaining_size < input_buffer.len() {
@@ -147,18 +147,16 @@ impl HeatshrinkDecoder {
             self.bit_index = 8;
         }
 
-        (HSsinkRes::SinkOK, copy_size)
+        HSsinkRes::SinkOK(copy_size)
     }
 
     /// function to process the input/internal buffer and put the uncompressed
     /// stream in the provided buffer.
-    pub fn poll(&mut self, output_buffer: &mut [u8]) -> (HSpollRes, usize) {
+    pub fn poll(&mut self, output_buffer: &mut [u8]) -> HSpollRes {
         if output_buffer.is_empty() {
-            (HSpollRes::PollErrorMisuse, 0)
+            HSpollRes::PollErrorMisuse
         } else {
-            let mut output_size: usize = 0;
-
-            let mut output_info = OutputInfo::new(output_buffer, &mut output_size);
+            let mut output_info = OutputInfo::new(output_buffer);
 
             loop {
                 let previous_state = self.state;
@@ -188,9 +186,9 @@ impl HeatshrinkDecoder {
                 // output buffer are exhausted.
                 if self.state == previous_state {
                     if output_info.can_take_byte() {
-                        return (HSpollRes::PollEmpty, output_size);
+                        return HSpollRes::PollEmpty(output_info.output_size);
                     } else {
-                        return (HSpollRes::PollMore, output_size);
+                        return HSpollRes::PollMore(output_info.output_size);
                     }
                 }
             }

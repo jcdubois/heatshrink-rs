@@ -30,7 +30,7 @@ pub enum HSsinkRes {
     /// Internal buffer is full, no data was added
     SinkFull,
     /// Data was correctly added to internal buffer
-    SinkOK,
+    SinkOK(usize),
 }
 
 /// Return code for poll function call
@@ -39,9 +39,9 @@ pub enum HSpollRes {
     /// Error in input parameters
     PollErrorMisuse,
     /// More data available to be processed
-    PollMore,
+    PollMore(usize),
     /// No more data to process
-    PollEmpty,
+    PollEmpty(usize),
 }
 
 /// Return code for finish function call
@@ -64,34 +64,34 @@ pub enum HSError {
 
 /// Structure to manage the output buffer and keep track of how much it is
 /// filled
-pub struct OutputInfo<'a, 'b> {
+pub struct OutputInfo<'a> {
     output_buffer: &'a mut [u8],
-    output_size: &'b mut usize,
+    output_size: usize,
 }
 
-impl<'a, 'b> OutputInfo<'a, 'b> {
+impl<'a> OutputInfo<'a> {
     /// Create a new OutputInfo instance from provided parameters
-    fn new(output_buffer: &'a mut [u8], output_size: &'b mut usize) -> Self {
+    fn new(output_buffer: &'a mut [u8]) -> Self {
         OutputInfo {
-            output_buffer,
-            output_size,
+            output_buffer : output_buffer,
+            output_size : 0 as usize,
         }
     }
 
     /// Add a byte to the OutputInfo referenced buffer
     fn push_byte(&mut self, byte: u8) {
-        self.output_buffer[*self.output_size] = byte;
-        *self.output_size += 1;
+        self.output_buffer[self.output_size] = byte;
+        self.output_size += 1;
     }
 
     /// Check if there is space left in the OutputInfo buffer
     fn can_take_byte(&self) -> bool {
-        *self.output_size < self.output_buffer.len()
+        self.output_size < self.output_buffer.len()
     }
 
     /// get the free space in the buffer
     fn remaining_free_size(&self) -> usize {
-        self.output_buffer.len() - *self.output_size
+        self.output_buffer.len() - self.output_size
     }
 }
 
