@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 
 const HEATSHRINK_APP_BUFFER_SIZE: usize = 64 * 1024;
 
-#[derive(Parser)] // requires `derive` feature
+#[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 #[clap(group(ArgGroup::new("command").required(true).args(&["encode", "decode"])))]
 struct Cli {
@@ -39,37 +39,36 @@ struct Cli {
     )]
     bits: u8,
 
-    /// some regular input. It will default to stdin if unspecified.
+    /// Input file (defaults to stdin if unspecified)
     #[clap(group = "input")]
     input_file: Option<String>,
 
-    /// some regular output. It will default to stdout if unspecified.
+    /// Output file (defaults to stdout if unspecified)
     #[clap(group = "output")]
     output_file: Option<String>,
 }
 
-fn report(use_stderr: bool, file_name: &String, input_len: usize, output_len: usize) {
+fn report(use_stderr: bool, file_name: &str, input_len: usize, output_len: usize) {
+    let ratio = 100.0 - (100.0 * output_len as f32) / input_len as f32;
+    let msg = format!(
+        "{} {:.2}% \t{} -> {} (-w {} -l {})",
+        file_name,
+        ratio,
+        input_len,
+        output_len,
+        heatshrink::HEATSHRINK_WINDOWS_BITS,
+        heatshrink::HEATSHRINK_LOOKAHEAD_BITS
+    );
     if use_stderr {
-        eprintln!(
-            "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
-            file_name,
-            100.0 - (100.0 * output_len as f32) / input_len as f32,
-            input_len,
-            output_len,
-            heatshrink::HEATSHRINK_WINDOWS_BITS,
-            heatshrink::HEATSHRINK_LOOKAHEAD_BITS
-        );
+        eprintln!("{}", msg);
     } else {
-        println!(
-            "{0:} {1:.2}% \t{2:} -> {3:} (-w {4:} -l {5:})",
-            file_name,
-            100.0 - (100.0 * output_len as f32) / input_len as f32,
-            input_len,
-            output_len,
-            heatshrink::HEATSHRINK_WINDOWS_BITS,
-            heatshrink::HEATSHRINK_LOOKAHEAD_BITS
-        );
+        println!("{}", msg);
     }
+}
+
+#[inline]
+fn flush_output(output_file: &mut Box<dyn Write>, buf: &[u8]) -> Result<(), io::Error> {
+    output_file.write_all(buf)
 }
 
 fn encode(
@@ -78,68 +77,62 @@ fn encode(
 ) -> Result<(usize, usize), io::Error> {
     let mut input_buffer = [0u8; HEATSHRINK_APP_BUFFER_SIZE];
     let mut output_buffer = [0u8; HEATSHRINK_APP_BUFFER_SIZE];
-    let mut encoding_is_complete = false;
     let mut total_input_byte_size = 0;
     let mut total_output_byte_size = 0;
 
     let mut enc: heatshrink::encoder::HeatshrinkEncoder = Default::default();
 
-    let mut output_bytes_processed = 0;
-
     loop {
-        match input_file.read(&mut input_buffer[0..]) {
-            Err(err) => return Err(err),
-            Ok(input_bytes_read) => {
-                total_input_byte_size += input_bytes_read;
+        let input_bytes_read = input_file.read(&mut input_buffer)?;
+        total_input_byte_size += input_bytes_read;
 
-                let mut input_bytes_processed = 0;
+        let mut input_bytes_processed = 0;
 
-                loop {
-                    if input_bytes_read > 0 {
-                        match enc.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
-                            heatshrink::HSsinkRes::SinkOK(segment_input_size) => {
-                                // Data has been added to the encoder.
-                                // Let's try to process/poll it
-                                input_bytes_processed += segment_input_size;
-                            }
-                            heatshrink::HSsinkRes::SinkFull => {
-                                // Hum ... no data was added to the encoder because
-                                // the internal buffer was already full.
-                                eprintln!("Input buffer is full and unprocessed");
-                                return Err(io::ErrorKind::Other.into());
-                            }
-                            heatshrink::HSsinkRes::SinkErrorMisuse => {
-                                eprintln!("Error in HeatshrinkEncoder::sink()");
-                                return Err(io::ErrorKind::Other.into());
-                            }
-                        }
+        while input_bytes_processed < input_bytes_read {
+            match enc.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
+                heatshrink::HSsinkRes::SinkOK(n) => {
+                    input_bytes_processed += n;
+                }
+                heatshrink::HSsinkRes::SinkFull => {}
+                heatshrink::HSsinkRes::SinkErrorMisuse => {
+                    eprintln!("Error in HeatshrinkEncoder::sink()");
+                    return Err(io::ErrorKind::Other.into());
+                }
+            }
+
+            loop {
+                match enc.poll(&mut output_buffer) {
+                    heatshrink::HSpollRes::PollMore(n) => {
+                        flush_output(output_file, &output_buffer[..n])?;
+                        total_output_byte_size += n;
                     }
+                    heatshrink::HSpollRes::PollEmpty(n) => {
+                        flush_output(output_file, &output_buffer[..n])?;
+                        total_output_byte_size += n;
+                        break;
+                    }
+                    heatshrink::HSpollRes::PollErrorMisuse => {
+                        eprintln!("Error in HeatshrinkEncoder::poll()");
+                        return Err(io::ErrorKind::Other.into());
+                    }
+                }
+            }
+        }
 
-                    loop {
-                        // process the current input buffer
-                        match enc.poll(&mut output_buffer[output_bytes_processed..]) {
-                            heatshrink::HSpollRes::PollMore(segment_output_size) => {
-                                output_bytes_processed += segment_output_size;
-                                let mut buf_begin = 0;
-                                while buf_begin != output_bytes_processed {
-                                    match output_file
-                                        .write(&output_buffer[buf_begin..output_bytes_processed])
-                                    {
-                                        Err(err) => return Err(err),
-                                        Ok(bytes_written) => {
-                                            buf_begin += bytes_written;
-                                        }
-                                    }
-                                }
-                                total_output_byte_size += output_bytes_processed;
-                                output_bytes_processed = 0;
-                                // Some more data is avaialble in input_buffer.
-                                // Let's loop.
+        // End of file => finich the compressed stream
+        if input_bytes_read == 0 {
+            loop {
+                match enc.finish() {
+                    heatshrink::HSfinishRes::FinishDone => break,
+                    heatshrink::HSfinishRes::FinishMore => loop {
+                        match enc.poll(&mut output_buffer) {
+                            heatshrink::HSpollRes::PollMore(n) => {
+                                flush_output(output_file, &output_buffer[..n])?;
+                                total_output_byte_size += n;
                             }
-                            heatshrink::HSpollRes::PollEmpty(segment_output_size) => {
-                                output_bytes_processed += segment_output_size;
-                                // The input_buffer is consumed.
-                                // Exit the loop.
+                            heatshrink::HSpollRes::PollEmpty(n) => {
+                                flush_output(output_file, &output_buffer[..n])?;
+                                total_output_byte_size += n;
                                 break;
                             }
                             heatshrink::HSpollRes::PollErrorMisuse => {
@@ -147,38 +140,9 @@ fn encode(
                                 return Err(io::ErrorKind::Other.into());
                             }
                         }
-                    }
-
-                    if input_bytes_read == 0 {
-                        if output_bytes_processed != 0 {
-                            let mut buf_begin = 0;
-                            while buf_begin != output_bytes_processed {
-                                match output_file
-                                    .write(&output_buffer[buf_begin..output_bytes_processed])
-                                {
-                                    Err(err) => return Err(err),
-                                    Ok(bytes_written) => {
-                                        buf_begin += bytes_written;
-                                    }
-                                }
-                            }
-                            total_output_byte_size += output_bytes_processed;
-                            output_bytes_processed = 0;
-                        }
-                        if let heatshrink::HSfinishRes::FinishDone = enc.finish() {
-                            encoding_is_complete = true;
-                            break;
-                        }
-                    }
-
-                    if input_bytes_read == input_bytes_processed {
-                        break;
-                    }
+                    },
                 }
             }
-        }
-
-        if encoding_is_complete {
             break;
         }
     }
@@ -197,110 +161,65 @@ fn decode(
 
     let mut dec: heatshrink::decoder::HeatshrinkDecoder = Default::default();
 
-    let mut output_bytes_processed = 0;
-
     loop {
-        match input_file.read(&mut input_buffer) {
-            Err(err) => return Err(err),
-            Ok(input_bytes_read) => {
-                total_input_byte_size += input_bytes_read;
+        let input_bytes_read = input_file.read(&mut input_buffer)?;
+        total_input_byte_size += input_bytes_read;
 
-                if input_bytes_read == 0 {
-                    match dec.finish() {
-                        heatshrink::HSfinishRes::FinishDone => {
-                            if output_bytes_processed != 0 {
-                                let mut buf_begin = 0;
-                                while buf_begin != output_bytes_processed {
-                                    match output_file
-                                        .write(&output_buffer[buf_begin..output_bytes_processed])
-                                    {
-                                        Err(err) => return Err(err),
-                                        Ok(bytes_written) => {
-                                            buf_begin += bytes_written;
-                                        }
-                                    }
-                                }
-                                total_output_byte_size += output_bytes_processed;
-                            }
-                            // the input input_buffer if empty now.
-                            break;
-                        }
-                        heatshrink::HSfinishRes::FinishMore => {
-                            // More data to be processed ?
-                        }
-                    }
+        // End of file => Check everything has been processed
+        if input_bytes_read == 0 {
+            match dec.finish() {
+                heatshrink::HSfinishRes::FinishDone => {}
+                heatshrink::HSfinishRes::FinishMore => {
+                    eprintln!("Decoder has unprocessed data at end of input");
+                    return Err(io::ErrorKind::UnexpectedEof.into());
                 }
+            }
+            break;
+        }
 
-                let mut input_bytes_processed = 0;
+        let mut input_bytes_processed = 0;
 
-                while input_bytes_processed < input_bytes_read {
-                    match dec.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
-                        heatshrink::HSsinkRes::SinkOK(segment_input_size) => {
-                            // Data has been added to the decoder.
-                            // Let's try to process/poll it
-                            input_bytes_processed += segment_input_size;
-                        }
-                        heatshrink::HSsinkRes::SinkFull => {
-                            // Hum ... no data was added to the decoder because
-                            // the internal buffer was already full.
-                            eprintln!("Input buffer is full and unprocessed");
-                            return Err(io::ErrorKind::Other.into());
-                        }
-                        heatshrink::HSsinkRes::SinkErrorMisuse => {
-                            // We should abort/assert/return
-                            eprintln!("Error in HeatshrinkDecoder::sink()");
-                            return Err(io::ErrorKind::Other.into());
-                        }
+        while input_bytes_processed < input_bytes_read {
+            match dec.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
+                heatshrink::HSsinkRes::SinkOK(n) => {
+                    input_bytes_processed += n;
+                }
+                heatshrink::HSsinkRes::SinkFull => {}
+                heatshrink::HSsinkRes::SinkErrorMisuse => {
+                    eprintln!("Error in HeatshrinkDecoder::sink()");
+                    return Err(io::ErrorKind::Other.into());
+                }
+            }
+
+            loop {
+                match dec.poll(&mut output_buffer) {
+                    heatshrink::HSpollRes::PollMore(n) => {
+                        flush_output(output_file, &output_buffer[..n])?;
+                        total_output_byte_size += n;
                     }
-
-                    loop {
-                        // process the current input buffer
-                        match dec.poll(&mut output_buffer[output_bytes_processed..]) {
-                            heatshrink::HSpollRes::PollMore(segment_output_size) => {
-                                output_bytes_processed += segment_output_size;
-                                let mut buf_begin = 0;
-                                while buf_begin != output_bytes_processed {
-                                    match output_file
-                                        .write(&output_buffer[buf_begin..output_bytes_processed])
-                                    {
-                                        Err(err) => return Err(err),
-                                        Ok(bytes_written) => {
-                                            buf_begin += bytes_written;
-                                        }
-                                    }
-                                }
-                                total_output_byte_size += output_bytes_processed;
-                                output_bytes_processed = 0;
-                                // Some more data is avaialble in input_buffer.
-                                // Let's loop.
-                            }
-                            heatshrink::HSpollRes::PollEmpty(segment_output_size) => {
-                                output_bytes_processed += segment_output_size;
-                                // The input_buffer is consumed.
-                                // Exit the loop.
-                                break;
-                            }
-                            heatshrink::HSpollRes::PollErrorMisuse => {
-                                // We should abort/assert/return
-                                eprintln!("Error in HeatshrinkDecoder::poll()");
-                                return Err(io::ErrorKind::Other.into());
-                            }
-                        }
+                    heatshrink::HSpollRes::PollEmpty(n) => {
+                        flush_output(output_file, &output_buffer[..n])?;
+                        total_output_byte_size += n;
+                        break;
+                    }
+                    heatshrink::HSpollRes::PollErrorMisuse => {
+                        eprintln!("Error in HeatshrinkDecoder::poll()");
+                        return Err(io::ErrorKind::Other.into());
                     }
                 }
             }
         }
     }
+
     Ok((total_input_byte_size, total_output_byte_size))
 }
 
 fn main() {
-    // parse the command line parameters
     let args = Cli::parse();
 
     if args.size != heatshrink::HEATSHRINK_WINDOWS_BITS {
         eprintln!(
-            "For now only the default value [{0:}] is supported for window size",
+            "For now only the default value [{}] is supported for window size",
             heatshrink::HEATSHRINK_WINDOWS_BITS
         );
         std::process::exit(1);
@@ -308,15 +227,18 @@ fn main() {
 
     if args.bits != heatshrink::HEATSHRINK_LOOKAHEAD_BITS {
         eprintln!(
-            "For now only the default value [{0:}] is supported for back-reference length",
+            "For now only the default value [{}] is supported for back-reference length",
             heatshrink::HEATSHRINK_LOOKAHEAD_BITS
         );
         std::process::exit(1);
     }
 
-    // Open input file for read
+    let file_name = match &args.input_file {
+        None => "-".to_string(),
+        Some(f) => f.clone(),
+    };
+
     let mut input_file: Box<dyn Read> = match args.input_file {
-        // if no file name was provided use stdin instead
         None => Box::new(BufReader::new(io::stdin())),
         Some(ref filename) => match File::open(filename) {
             Ok(file) => Box::new(BufReader::new(file)),
@@ -327,9 +249,7 @@ fn main() {
         },
     };
 
-    // Open output file for write
     let mut output_file: Box<dyn Write> = match args.output_file {
-        // if no file name was provided use stdout instead
         None => Box::new(BufWriter::new(io::stdout())),
         Some(ref filename) => match File::create(filename) {
             Ok(file) => Box::new(BufWriter::new(file)),
@@ -340,22 +260,19 @@ fn main() {
         },
     };
 
-    match if args.encode {
+    let result = if args.encode {
         encode(&mut input_file, &mut output_file)
     } else {
         decode(&mut input_file, &mut output_file)
-    } {
+    };
+
+    match result {
         Err(err) => {
             eprintln!("encode/decode operation failed : {}", err);
             std::process::exit(1)
         }
         Ok((input_size, output_size)) => {
-            // Output log if requested
             if args.verbose {
-                let file_name = match args.input_file {
-                    None => "-".to_string(),
-                    Some(ref filename) => filename.to_string(),
-                };
                 report(
                     args.output_file.is_none(),
                     &file_name,
