@@ -119,7 +119,7 @@ fn encode(
             }
         }
 
-        // End of file => finich the compressed stream
+        // End of file => finish the compressed stream
         if input_bytes_read == 0 {
             loop {
                 match enc.finish() {
