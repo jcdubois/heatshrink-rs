@@ -71,6 +71,7 @@ pub struct OutputInfo<'a> {
 
 impl<'a> OutputInfo<'a> {
     /// Create a new OutputInfo instance from provided parameters
+    #[inline]
     fn new(output_buffer: &'a mut [u8]) -> Self {
         OutputInfo {
             output_buffer,
@@ -79,17 +80,20 @@ impl<'a> OutputInfo<'a> {
     }
 
     /// Add a byte to the OutputInfo referenced buffer
+    #[inline]
     fn push_byte(&mut self, byte: u8) {
         self.output_buffer[self.output_size] = byte;
         self.output_size += 1;
     }
 
     /// Check if there is space left in the OutputInfo buffer
+    #[inline]
     fn can_take_byte(&self) -> bool {
         self.output_size < self.output_buffer.len()
     }
 
     /// get the free space in the buffer
+    #[inline]
     fn remaining_free_size(&self) -> usize {
         self.output_buffer.len() - self.output_size
     }
