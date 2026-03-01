@@ -282,6 +282,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn st_step_search(&mut self) -> HSEstate {
         if self.match_scan_index
             + (if self.is_finishing() {
@@ -321,6 +322,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn st_yield_tag_bit(&mut self, output_info: &mut OutputInfo) -> HSEstate {
         if output_info.can_take_byte() {
             if self.match_length == 0 {
@@ -337,6 +339,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn st_yield_literal(&mut self, output_info: &mut OutputInfo) -> HSEstate {
         if output_info.can_take_byte() {
             self.push_literal_byte(output_info);
@@ -346,6 +349,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn st_yield_br_index(&mut self, output_info: &mut OutputInfo) -> HSEstate {
         if output_info.can_take_byte() {
             if self.push_outgoing_bits(output_info) > 0 {
@@ -360,6 +364,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn st_yield_br_length(&mut self, output_info: &mut OutputInfo) -> HSEstate {
         if output_info.can_take_byte() {
             if self.push_outgoing_bits(output_info) > 0 {
@@ -374,11 +379,13 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn st_save_backlog(&mut self) -> HSEstate {
         self.save_backlog();
         HSEstate::NotFull
     }
 
+    #[inline]
     fn st_flush_bit_buffer(&self, output_info: &mut OutputInfo) -> HSEstate {
         if self.bit_index == 8 {
             HSEstate::Done
@@ -390,18 +397,22 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn add_tag_bit(&mut self, output_info: &mut OutputInfo, tag: u8) {
         self.push_bits(1, tag, output_info)
     }
 
+    #[inline]
     fn get_input_offset(&self) -> usize {
         self.get_input_buffer_size()
     }
 
+    #[inline]
     fn get_input_buffer_size(&self) -> usize {
         self.input_buffer.len() / 2
     }
 
+    #[inline]
     fn get_lookahead_size(&self) -> usize {
         1 << HEATSHRINK_LOOKAHEAD_BITS
     }
@@ -410,6 +421,7 @@ impl HeatshrinkEncoder {
         (self.flags & FLAG_IS_FINISHING) == FLAG_IS_FINISHING
     }
 
+    #[inline]
     fn do_indexing(&mut self) {
         #[cfg(feature = "heatshrink-use-index")]
         {
@@ -440,6 +452,7 @@ impl HeatshrinkEncoder {
 
     /// Return the longest match for the bytes at buf[end:end+maxlen] between
     /// buf[start] and buf[end-1]. If no match is found, return -1.
+    #[inline]
     fn find_longest_match(
         &self,
         start: usize,
@@ -533,6 +546,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn push_outgoing_bits(&mut self, output_info: &mut OutputInfo) -> u8 {
         let (count, bits) = if self.outgoing_bits_count > 8 {
             (
@@ -553,12 +567,13 @@ impl HeatshrinkEncoder {
 
     /// Push COUNT (max 8) bits to the output buffer, which has room.
     /// Bytes are set from the lowest bits, up.
+    #[inline]
     fn push_bits(&mut self, count: u8, bits: u8, output_info: &mut OutputInfo) {
         assert!(count > 0 && count <= 8);
 
         if count >= self.bit_index {
             let shift = count - self.bit_index;
-            let tmp_byte = self.current_byte | bits >> shift;
+            let tmp_byte = self.current_byte | (bits >> shift);
             output_info.push_byte(tmp_byte);
             self.bit_index = 8 - shift;
             if shift == 0 {
@@ -572,6 +587,7 @@ impl HeatshrinkEncoder {
         }
     }
 
+    #[inline]
     fn push_literal_byte(&mut self, output_info: &mut OutputInfo) {
         self.push_bits(
             8,
@@ -580,6 +596,7 @@ impl HeatshrinkEncoder {
         );
     }
 
+    #[inline]
     fn save_backlog(&mut self) {
         // Copy processed data to beginning of buffer, so it can be used for
         // future matches. Don't bother checking whether the input is less

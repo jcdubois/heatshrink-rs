@@ -195,6 +195,7 @@ impl HeatshrinkDecoder {
         }
     }
 
+    #[inline]
     fn st_tag_bit(&mut self) -> HSDstate {
         match self.get_bits(1) {
             None => HSDstate::TagBit,
@@ -206,6 +207,7 @@ impl HeatshrinkDecoder {
         }
     }
 
+    #[inline]
     fn st_yield_literal(&mut self, output_info: &mut OutputInfo) -> HSDstate {
         // Emit a repeated section from the window buffer, and add it (again)
         // to the window buffer. (Note that the repetition can include itself)
@@ -226,6 +228,7 @@ impl HeatshrinkDecoder {
         }
     }
 
+    #[inline]
     fn st_backref_index_msb(&mut self) -> HSDstate {
         match self.get_bits(0) {
             None => HSDstate::BackrefIndexMsb,
@@ -236,6 +239,7 @@ impl HeatshrinkDecoder {
         }
     }
 
+    #[inline]
     fn st_backref_index_lsb(&mut self) -> HSDstate {
         match self.get_bits(8) {
             None => HSDstate::BackrefIndexLsb,
@@ -248,6 +252,7 @@ impl HeatshrinkDecoder {
         }
     }
 
+    #[inline]
     fn st_backref_count_lsb(&mut self) -> HSDstate {
         match self.get_bits(HEATSHRINK_LOOKAHEAD_BITS) {
             None => HSDstate::BackrefCountLsb,
@@ -259,6 +264,7 @@ impl HeatshrinkDecoder {
         }
     }
 
+    #[inline]
     fn st_yield_backref(&mut self, output_info: &mut OutputInfo) -> HSDstate {
         if output_info.can_take_byte() {
             let len = self.output_buffer.len();
@@ -296,6 +302,7 @@ impl HeatshrinkDecoder {
 
     /// Get the next COUNT bits from the input buffer, saving incremental
     /// progress. Returns None on end of input.
+    #[inline]
     fn get_bits(&mut self, count: u8) -> Option<u8> {
         assert!(count <= 8);
 
