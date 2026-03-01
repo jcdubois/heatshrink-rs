@@ -22,7 +22,7 @@ pub const HEATSHRINK_LOOKAHEAD_BITS: u8 = 4;
 
 const HEATSHRINK_INPUT_BUFFER_SIZE: usize = 32;
 
-/// Return code for sink finction call
+/// Return code for sink function call
 #[derive(Debug)]
 pub enum HSsinkRes {
     /// instance is not in correct state.
@@ -47,13 +47,13 @@ pub enum HSpollRes {
 /// Return code for finish function call
 #[derive(Debug)]
 pub enum HSfinishRes {
-    /// More data availble in input buffer
+    /// More data available in input buffer
     FinishMore,
     /// Operation is done
     FinishDone,
 }
 
-/// Error that can be encountered while (un)compresing data
+/// Error that can be encountered while (un)compressing data
 #[derive(Debug)]
 pub enum HSError {
     /// The output buffer was not large enough to hold output data
@@ -75,7 +75,7 @@ impl<'a> OutputInfo<'a> {
     fn new(output_buffer: &'a mut [u8]) -> Self {
         OutputInfo {
             output_buffer,
-            output_size : 0_usize,
+            output_size: 0_usize,
         }
     }
 
@@ -185,7 +185,9 @@ mod test {
     #[test]
     fn clib_compatibility() {
         let src = hex_literal::hex!("90D4B2B549A4082BE00F000E4C46DF2817C605F005B4BE0825F00280");
-        let expected = hex_literal::hex!                                        ("21529554340200000000000000000000000000000000000000000000000000000000000000000 0009302000000000000F202F102F0020000000000002F0400000000000000000000000000000000000000000000");
+        // Note: hex_literal ignore les espaces, ce qui permet de découper la ligne
+        // sans introduire d'octets supplémentaires.
+        let expected = hex_literal::hex!("21529554340200000000000000000000000000000000000000000000000000000000000000000 0009302000000000000F202F102F0020000000000002F0400000000000000000000000000000000000000000000");
         let mut dst: [u8; 100] = [0; 100];
 
         let out = decoder::decode(&src, &mut dst).unwrap();

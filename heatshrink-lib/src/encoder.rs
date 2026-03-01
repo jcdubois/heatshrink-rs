@@ -20,7 +20,6 @@ enum HSEstate {
     Done,          /* done */
 }
 
-#[cfg(not(feature = "heatshrink-use-index"))]
 /// The encoder instance
 #[derive(Debug)]
 pub struct HeatshrinkEncoder {
@@ -30,33 +29,14 @@ pub struct HeatshrinkEncoder {
     match_position: usize,
     outgoing_bits: u16,
     outgoing_bits_count: u8,
-    flags: u8,
+    is_finishing: bool,
     current_byte: u8,
     bit_index: u8,
     state: HSEstate,
+    #[cfg(feature = "heatshrink-use-index")]
+    search_index: [Option<u16>; 2 << HEATSHRINK_WINDOWS_BITS],
     input_buffer: [u8; 2 << HEATSHRINK_WINDOWS_BITS],
 }
-
-#[cfg(feature = "heatshrink-use-index")]
-/// The encoder instance
-#[derive(Debug)]
-pub struct HeatshrinkEncoder {
-    input_size: usize,
-    match_scan_index: usize,
-    match_length: usize,
-    match_position: usize,
-    outgoing_bits: u16,
-    outgoing_bits_count: u8,
-    flags: u8,
-    current_byte: u8,
-    bit_index: u8,
-    state: HSEstate,
-    search_index: [Option<usize>; 2 << HEATSHRINK_WINDOWS_BITS],
-    input_buffer: [u8; 2 << HEATSHRINK_WINDOWS_BITS],
-}
-
-/// A constant flag to set an encoder as finishing
-const FLAG_IS_FINISHING: u8 = 1;
 
 /// compress the src buffer to the destination buffer
 pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
@@ -65,42 +45,47 @@ pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
 
     let mut enc: HeatshrinkEncoder = Default::default();
 
-    while total_input_size < src.len() {
-        // Fill the input buffer from the src buffer
-        match enc.sink(&src[total_input_size..]) {
-            HSsinkRes::SinkOK(segment_input_size) => {
-                total_input_size += segment_input_size;
-            }
-            HSsinkRes::SinkFull => {
-                return Err(HSError::Internal);
-            }
-            HSsinkRes::SinkErrorMisuse => {
-                return Err(HSError::Internal);
-            }
-        }
-
-        // if all the src buffer is processed, finish the compress stream
-        if total_input_size == src.len() {
-            match enc.finish() {
-                HSfinishRes::FinishDone => {}
-                HSfinishRes::FinishMore => {}
-            }
-        }
-
-        if total_output_size == dst.len() {
-            return Err(HSError::OutputFull);
-        } else {
-            // process the current input buffer
-            match enc.poll(&mut dst[total_output_size..]) {
-                HSpollRes::PollMore(_) => {
-                    return Err(HSError::OutputFull);
+    loop {
+        // Feed in the encoder while data last
+        if total_input_size < src.len() {
+            match enc.sink(&src[total_input_size..]) {
+                HSsinkRes::SinkOK(segment_input_size) => {
+                    total_input_size += segment_input_size;
                 }
-                HSpollRes::PollEmpty(segment_output_size) => {
-                    total_output_size += segment_output_size;
-                }
-                HSpollRes::PollErrorMisuse => {
+                HSsinkRes::SinkFull => {}
+                HSsinkRes::SinkErrorMisuse => {
                     return Err(HSError::Internal);
                 }
+            }
+        }
+
+        // Notify the end of stream when no more data to process
+        if total_input_size == src.len() {
+            enc.finish();
+        }
+
+        // Check that there is some available space on output
+        if total_output_size == dst.len() {
+            return Err(HSError::OutputFull);
+        }
+
+        match enc.poll(&mut dst[total_output_size..]) {
+            HSpollRes::PollMore(segment_output_size) => {
+                // There is more data to process but we are missing space on the output
+                total_output_size += segment_output_size;
+                if total_output_size == dst.len() {
+                    return Err(HSError::OutputFull);
+                }
+            }
+            HSpollRes::PollEmpty(segment_output_size) => {
+                total_output_size += segment_output_size;
+                // If all the input stream is consumed we are done.
+                if total_input_size == src.len() {
+                    break;
+                }
+            }
+            HSpollRes::PollErrorMisuse => {
+                return Err(HSError::Internal);
             }
         }
     }
@@ -117,39 +102,20 @@ impl Default for HeatshrinkEncoder {
 impl HeatshrinkEncoder {
     /// Create a new encoder instance
     pub fn new() -> Self {
-        #[cfg(feature = "heatshrink-use-index")]
-        {
-            HeatshrinkEncoder {
-                input_size: 0,
-                match_scan_index: 0,
-                match_length: 0,
-                match_position: 0,
-                outgoing_bits: 0,
-                outgoing_bits_count: 0,
-                flags: 0,
-                current_byte: 0,
-                bit_index: 8,
-                state: HSEstate::NotFull,
-                search_index: [None; 2 << HEATSHRINK_WINDOWS_BITS],
-                input_buffer: [0; 2 << HEATSHRINK_WINDOWS_BITS],
-            }
-        }
-
-        #[cfg(not(feature = "heatshrink-use-index"))]
-        {
-            HeatshrinkEncoder {
-                input_size: 0,
-                match_scan_index: 0,
-                match_length: 0,
-                match_position: 0,
-                outgoing_bits: 0,
-                outgoing_bits_count: 0,
-                flags: 0,
-                current_byte: 0,
-                bit_index: 8,
-                state: HSEstate::NotFull,
-                input_buffer: [0; 2 << HEATSHRINK_WINDOWS_BITS],
-            }
+        HeatshrinkEncoder {
+            input_size: 0,
+            match_scan_index: 0,
+            match_length: 0,
+            match_position: 0,
+            outgoing_bits: 0,
+            outgoing_bits_count: 0,
+            is_finishing: false,
+            current_byte: 0,
+            bit_index: 8,
+            state: HSEstate::NotFull,
+            #[cfg(feature = "heatshrink-use-index")]
+            search_index: [None; 2 << HEATSHRINK_WINDOWS_BITS],
+            input_buffer: [0; 2 << HEATSHRINK_WINDOWS_BITS],
         }
     }
 
@@ -161,15 +127,12 @@ impl HeatshrinkEncoder {
         self.match_position = 0;
         self.outgoing_bits = 0;
         self.outgoing_bits_count = 0;
-        self.flags = 0;
+        self.is_finishing = false;
         self.current_byte = 0;
         self.bit_index = 8;
         self.state = HSEstate::NotFull;
-        // memset self.buffer to 0
-        self.input_buffer.fill(0);
         #[cfg(feature = "heatshrink-use-index")]
         {
-            // memset self.search_index to None
             self.search_index.fill(None);
         }
     }
@@ -177,13 +140,13 @@ impl HeatshrinkEncoder {
     /// Add an input buffer to be processed/compressed
     pub fn sink(&mut self, input_buffer: &[u8]) -> HSsinkRes {
         /* Sinking more content after saying the content is done, tsk tsk */
-        if self.is_finishing() {
+        if self.is_finishing {
             return HSsinkRes::SinkErrorMisuse;
         }
 
         /* Sinking more content before processing is done */
         if self.state != HSEstate::NotFull {
-            return HSsinkRes::SinkErrorMisuse;
+            return HSsinkRes::SinkFull;
         }
 
         let remaining_size = self.get_input_buffer_size() - self.input_size;
@@ -192,11 +155,7 @@ impl HeatshrinkEncoder {
             return HSsinkRes::SinkFull;
         }
 
-        let copy_size = if remaining_size < input_buffer.len() {
-            remaining_size
-        } else {
-            input_buffer.len()
-        };
+        let copy_size = remaining_size.min(input_buffer.len());
 
         let write_offset = self.get_input_offset() + self.input_size;
 
@@ -216,60 +175,60 @@ impl HeatshrinkEncoder {
     /// stream in the provided buffer.
     pub fn poll(&mut self, output_buffer: &mut [u8]) -> HSpollRes {
         if output_buffer.is_empty() {
-            HSpollRes::PollMore(0)
-        } else {
-            let mut output_info = OutputInfo::new(output_buffer);
+            return HSpollRes::PollErrorMisuse;
+        }
 
-            loop {
-                let previous_state = self.state;
+        let mut output_info = OutputInfo::new(output_buffer);
 
-                match previous_state {
-                    HSEstate::NotFull => {
-                        return HSpollRes::PollEmpty(output_info.output_size);
-                    }
-                    HSEstate::Filled => {
-                        self.do_indexing();
-                        self.state = HSEstate::Search;
-                    }
-                    HSEstate::Search => {
-                        self.state = self.st_step_search();
-                    }
-                    HSEstate::YieldTagBit => {
-                        self.state = self.st_yield_tag_bit(&mut output_info);
-                    }
-                    HSEstate::YieldLiteral => {
-                        self.state = self.st_yield_literal(&mut output_info);
-                    }
-                    HSEstate::YieldBrIndex => {
-                        self.state = self.st_yield_br_index(&mut output_info);
-                    }
-                    HSEstate::YieldBrLength => {
-                        self.state = self.st_yield_br_length(&mut output_info);
-                    }
-                    HSEstate::SaveBacklog => {
-                        self.state = self.st_save_backlog();
-                    }
-                    HSEstate::FlushBits => {
-                        self.state = self.st_flush_bit_buffer(&mut output_info);
-                        return HSpollRes::PollEmpty(output_info.output_size);
-                    }
-                    HSEstate::Done => {
-                        return HSpollRes::PollEmpty(output_info.output_size);
-                    }
+        loop {
+            let previous_state = self.state;
+
+            match previous_state {
+                HSEstate::NotFull => {
+                    return HSpollRes::PollEmpty(output_info.output_size);
                 }
-
-                // If the current state cannot advance, check if output
-                // buffer is exhausted.
-                if self.state == previous_state && !output_info.can_take_byte() {
-                    return HSpollRes::PollMore(output_info.output_size);
+                HSEstate::Filled => {
+                    self.do_indexing();
+                    self.state = HSEstate::Search;
                 }
+                HSEstate::Search => {
+                    self.state = self.st_step_search();
+                }
+                HSEstate::YieldTagBit => {
+                    self.state = self.st_yield_tag_bit(&mut output_info);
+                }
+                HSEstate::YieldLiteral => {
+                    self.state = self.st_yield_literal(&mut output_info);
+                }
+                HSEstate::YieldBrIndex => {
+                    self.state = self.st_yield_br_index(&mut output_info);
+                }
+                HSEstate::YieldBrLength => {
+                    self.state = self.st_yield_br_length(&mut output_info);
+                }
+                HSEstate::SaveBacklog => {
+                    self.state = self.st_save_backlog();
+                }
+                HSEstate::FlushBits => {
+                    self.state = self.st_flush_bit_buffer(&mut output_info);
+                    return HSpollRes::PollEmpty(output_info.output_size);
+                }
+                HSEstate::Done => {
+                    return HSpollRes::PollEmpty(output_info.output_size);
+                }
+            }
+
+            // If the current state cannot advance, check if output
+            // buffer is exhausted.
+            if self.state == previous_state && !output_info.can_take_byte() {
+                return HSpollRes::PollMore(output_info.output_size);
             }
         }
     }
 
     /// Finish the compression stream.
     pub fn finish(&mut self) -> HSfinishRes {
-        self.flags |= FLAG_IS_FINISHING;
+        self.is_finishing = true;
 
         if self.state == HSEstate::NotFull {
             self.state = HSEstate::Filled;
@@ -285,14 +244,14 @@ impl HeatshrinkEncoder {
     #[inline]
     fn st_step_search(&mut self) -> HSEstate {
         if self.match_scan_index
-            + (if self.is_finishing() {
+            + (if self.is_finishing {
                 1
             } else {
                 self.get_lookahead_size()
             })
             > self.input_size
         {
-            if self.is_finishing() {
+            if self.is_finishing {
                 HSEstate::FlushBits
             } else {
                 HSEstate::SaveBacklog
@@ -331,7 +290,7 @@ impl HeatshrinkEncoder {
             } else {
                 self.add_tag_bit(output_info, 0);
                 self.outgoing_bits = self.match_position as u16 - 1;
-                self.outgoing_bits_count = 8;
+                self.outgoing_bits_count = HEATSHRINK_WINDOWS_BITS;
                 HSEstate::YieldBrIndex
             }
         } else {
@@ -356,7 +315,7 @@ impl HeatshrinkEncoder {
                 HSEstate::YieldBrIndex
             } else {
                 self.outgoing_bits = self.match_length as u16 - 1;
-                self.outgoing_bits_count = 4;
+                self.outgoing_bits_count = HEATSHRINK_LOOKAHEAD_BITS;
                 HSEstate::YieldBrLength
             }
         } else {
@@ -417,10 +376,6 @@ impl HeatshrinkEncoder {
         1 << HEATSHRINK_LOOKAHEAD_BITS
     }
 
-    fn is_finishing(&self) -> bool {
-        (self.flags & FLAG_IS_FINISHING) == FLAG_IS_FINISHING
-    }
-
     #[inline]
     fn do_indexing(&mut self) {
         #[cfg(feature = "heatshrink-use-index")]
@@ -431,27 +386,21 @@ impl HeatshrinkEncoder {
              * For example, if buf[200] == 'x', then index[200] will either
              * be an offset i such that buf[i] == 'x', or a None value
              * to indicate end-of-list. This significantly speeds up matching,
-             * while only using sizeof(Option<u16>)*sizeof(buffer) bytes of
-             * RAM.
-             *
-             * Future optimization options:
-             * -  The last lookahead_sz bytes of the index will not be
-             *    usable, so temporary data could be stored there to
-             *    dynamically improve the index.
-             * */
-            let mut last: [Option<usize>; 256] = [None; 256];
+             * while only using sizeof(Option<u16>)*sizeof(buffer) bytes of RAM.
+             */
+            let mut last: [Option<u16>; 256] = [None; 256];
             let end = self.get_input_offset() + self.input_size - 1;
 
             for i in 0..end {
                 let v: usize = self.input_buffer[i].into();
                 self.search_index[i] = last[v];
-                last[v] = Some(i);
+                last[v] = Some(i as u16);
             }
         }
     }
 
     /// Return the longest match for the bytes at buf[end:end+maxlen] between
-    /// buf[start] and buf[end-1]. If no match is found, return -1.
+    /// buf[start] and buf[end-1]. If no match is found, return None.
     #[inline]
     fn find_longest_match(
         &self,
@@ -502,7 +451,7 @@ impl HeatshrinkEncoder {
             let mut position = end;
 
             while let Some(next_position) = self.search_index[position] {
-                position = next_position;
+                position = next_position as usize;
 
                 if position < start {
                     break;

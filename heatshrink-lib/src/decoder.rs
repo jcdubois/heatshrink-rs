@@ -13,7 +13,7 @@ use core::cmp::Ordering;
 enum HSDstate {
     TagBit,          /* tag bit */
     YieldLiteral,    /* ready to yield literal byte */
-    BackrefIndexMsb, /* most significant byte of index */
+    BackrefIndexMsb, /* most significant byte of index (only used if W > 8) */
     BackrefIndexLsb, /* least significant byte of index */
     BackrefCountLsb, /* least significant byte of count */
     YieldBackref,    /* ready to yield back-reference */
@@ -117,7 +117,7 @@ impl HeatshrinkDecoder {
         self.current_byte = 0;
         self.bit_index = 0;
         self.state = HSDstate::TagBit;
-        // memset self.buffer to 0
+        // It is required to fill the buffer with 0 for the decoder
         self.input_buffer.fill(0);
         self.output_buffer.fill(0);
     }
@@ -130,11 +130,7 @@ impl HeatshrinkDecoder {
             return HSsinkRes::SinkFull;
         }
 
-        let copy_size = if remaining_size < input_buffer.len() {
-            remaining_size
-        } else {
-            input_buffer.len()
-        };
+        let copy_size = remaining_size.min(input_buffer.len());
 
         // memcpy content of input_buffer into self.input_buffer.
         self.input_buffer[self.input_size..(self.input_size + copy_size)]
@@ -154,42 +150,42 @@ impl HeatshrinkDecoder {
     /// stream in the provided buffer.
     pub fn poll(&mut self, output_buffer: &mut [u8]) -> HSpollRes {
         if output_buffer.is_empty() {
-            HSpollRes::PollErrorMisuse
-        } else {
-            let mut output_info = OutputInfo::new(output_buffer);
+            return HSpollRes::PollErrorMisuse;
+        }
 
-            loop {
-                let previous_state = self.state;
+        let mut output_info = OutputInfo::new(output_buffer);
 
-                match previous_state {
-                    HSDstate::TagBit => {
-                        self.state = self.st_tag_bit();
-                    }
-                    HSDstate::YieldLiteral => {
-                        self.state = self.st_yield_literal(&mut output_info);
-                    }
-                    HSDstate::BackrefIndexMsb => {
-                        self.state = self.st_backref_index_msb();
-                    }
-                    HSDstate::BackrefIndexLsb => {
-                        self.state = self.st_backref_index_lsb();
-                    }
-                    HSDstate::BackrefCountLsb => {
-                        self.state = self.st_backref_count_lsb();
-                    }
-                    HSDstate::YieldBackref => {
-                        self.state = self.st_yield_backref(&mut output_info);
-                    }
+        loop {
+            let previous_state = self.state;
+
+            match previous_state {
+                HSDstate::TagBit => {
+                    self.state = self.st_tag_bit();
                 }
+                HSDstate::YieldLiteral => {
+                    self.state = self.st_yield_literal(&mut output_info);
+                }
+                HSDstate::BackrefIndexMsb => {
+                    self.state = self.st_backref_index_msb();
+                }
+                HSDstate::BackrefIndexLsb => {
+                    self.state = self.st_backref_index_lsb();
+                }
+                HSDstate::BackrefCountLsb => {
+                    self.state = self.st_backref_count_lsb();
+                }
+                HSDstate::YieldBackref => {
+                    self.state = self.st_yield_backref(&mut output_info);
+                }
+            }
 
-                // If the current state cannot advance, check if input or
-                // output buffer are exhausted.
-                if self.state == previous_state {
-                    if output_info.can_take_byte() {
-                        return HSpollRes::PollEmpty(output_info.output_size);
-                    } else {
-                        return HSpollRes::PollMore(output_info.output_size);
-                    }
+            // If the current state cannot advance, check if input or
+            // output buffer are exhausted.
+            if self.state == previous_state {
+                if output_info.can_take_byte() {
+                    return HSpollRes::PollEmpty(output_info.output_size);
+                } else {
+                    return HSpollRes::PollMore(output_info.output_size);
                 }
             }
         }
@@ -201,7 +197,11 @@ impl HeatshrinkDecoder {
             None => HSDstate::TagBit,
             Some(0) => {
                 self.output_index = 0;
-                HSDstate::BackrefIndexLsb
+                if HEATSHRINK_WINDOWS_BITS > 8 {
+                    HSDstate::BackrefIndexMsb
+                } else {
+                    HSDstate::BackrefIndexLsb
+                }
             }
             Some(_) => HSDstate::YieldLiteral,
         }
@@ -228,9 +228,11 @@ impl HeatshrinkDecoder {
         }
     }
 
+    // This function is only called if HEATSHRINK_WINDOWS_BITS > 8
     #[inline]
     fn st_backref_index_msb(&mut self) -> HSDstate {
-        match self.get_bits(0) {
+        let msb_bits = HEATSHRINK_WINDOWS_BITS - 8;
+        match self.get_bits(msb_bits) {
             None => HSDstate::BackrefIndexMsb,
             Some(x) => {
                 self.output_index = (x as usize) << 8;
@@ -333,7 +335,6 @@ impl HeatshrinkDecoder {
                     // consumed. So let's set the bit_index to 0 to show
                     // there is nothning left to consume.
                     self.bit_index = 0;
-                    // This will be set to 8 on next sink
                 } else {
                     // load next byte.
                     self.current_byte = self.input_buffer[self.input_index];
