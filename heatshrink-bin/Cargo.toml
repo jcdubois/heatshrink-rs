@@ -15,7 +15,10 @@
  path = "src/main.rs"
 
 [dependencies]
-heatshrink-lib = { version = "0.4.1", path = "../heatshrink-lib" }
+heatshrink-lib = { version = "1.0.0", path = "../heatshrink-lib" }
 clap.workspace = true
+
+[features]
+heatshrink-use-index = ["heatshrink-lib/heatshrink-use-index"]
 
 [dev-dependencies]
