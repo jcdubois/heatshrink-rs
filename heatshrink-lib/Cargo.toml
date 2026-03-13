@@ -9,17 +9,18 @@
  readme.workspace = true
  repository.workspace = true
  version.workspace = true
- 
+
 [lib]
  name = "heatshrink"
  path = "src/lib.rs"
 
 [dependencies]
+embedded-io = { version = "0.6", optional = true, default-features = false }
 
 [dev-dependencies]
  hex-literal.workspace = true
 
 [features]
- default = ["heatshrink-use-index"]
- # Define features
- heatshrink-use-index = []
+default = ["heatshrink-use-index"]
+heatshrink-use-index = []
+embedded-io = ["dep:embedded-io"]
