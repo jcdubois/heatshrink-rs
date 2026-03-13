@@ -1,8 +1,9 @@
-use super::HSError;
-use super::HSfinishRes;
-use super::HSpollRes;
-use super::HSsinkRes;
+use super::EncodeError;
+use super::Finish;
 use super::OutputInfo;
+use super::Poll;
+use super::PollError;
+use super::SinkError;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum HSDstate {
@@ -47,7 +48,7 @@ pub struct HeatshrinkDecoder<const W: usize, const L: usize, const I: usize, con
 }
 
 /// Decompress `src` into `dst` using the default parameters (W=8, L=4, I=32).
-pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], HSError> {
+pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], EncodeError> {
     let mut dec = super::DefaultDecoder::new();
     run_decode(&mut dec, src, dst)
 }
@@ -57,31 +58,31 @@ pub(crate) fn run_decode<'a, const W: usize, const L: usize, const I: usize, con
     dec: &mut HeatshrinkDecoder<W, L, I, WIN>,
     src: &[u8],
     dst: &'a mut [u8],
-) -> Result<&'a [u8], HSError> {
+) -> Result<&'a [u8], EncodeError> {
     let mut total_input_size = 0;
     let mut total_output_size = 0;
 
     while total_input_size < src.len() {
         match dec.sink(&src[total_input_size..]) {
-            HSsinkRes::SinkOK(n) => total_input_size += n,
-            HSsinkRes::SinkFull => {}
-            HSsinkRes::SinkErrorMisuse => return Err(HSError::Internal),
+            Ok(n) => total_input_size += n,
+            Err(SinkError::Full) => {}
+            Err(SinkError::Misuse) => return Err(EncodeError::Internal),
         }
 
         if total_output_size == dst.len() {
-            return Err(HSError::OutputFull);
+            return Err(EncodeError::OutputFull);
         }
 
         match dec.poll(&mut dst[total_output_size..]) {
-            HSpollRes::PollMore(_) => return Err(HSError::OutputFull),
-            HSpollRes::PollEmpty(n) => total_output_size += n,
-            HSpollRes::PollErrorMisuse => return Err(HSError::Internal),
+            Ok(Poll::More(_)) => return Err(EncodeError::OutputFull),
+            Ok(Poll::Empty(n)) => total_output_size += n,
+            Err(_) => return Err(EncodeError::Internal),
         }
 
         if total_input_size == src.len() {
             match dec.finish() {
-                HSfinishRes::FinishDone => {}
-                HSfinishRes::FinishMore => return Err(HSError::OutputFull),
+                Finish::Done => {}
+                Finish::More => return Err(EncodeError::OutputFull),
             }
         }
     }
@@ -145,7 +146,7 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
     }
 
     /// Feed compressed data into the decoder.
-    pub fn sink(&mut self, input_buffer: &[u8]) -> HSsinkRes {
+    pub fn sink(&mut self, input_buffer: &[u8]) -> Result<usize, SinkError> {
         // Compact: slide unconsumed bytes to the front so the whole buffer
         // is available for new data.  input_index bytes at the start have
         // already been consumed by get_bits and can be overwritten.
@@ -162,7 +163,7 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
 
         let remaining_size = self.input_buffer.len() - self.input_size;
         if remaining_size == 0 {
-            return HSsinkRes::SinkFull;
+            return Err(SinkError::Full);
         }
 
         let copy_size = remaining_size.min(input_buffer.len());
@@ -176,13 +177,13 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
             self.bit_index = 8;
         }
 
-        HSsinkRes::SinkOK(copy_size)
+        Ok(copy_size)
     }
 
     /// Pull decompressed output out of the decoder into `output_buffer`.
-    pub fn poll(&mut self, output_buffer: &mut [u8]) -> HSpollRes {
+    pub fn poll(&mut self, output_buffer: &mut [u8]) -> Result<Poll, PollError> {
         if output_buffer.is_empty() {
-            return HSpollRes::PollErrorMisuse;
+            return Err(PollError::Misuse);
         }
 
         let mut output_info = OutputInfo::new(output_buffer);
@@ -213,20 +214,20 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
 
             if self.state == previous_state {
                 return if output_info.can_take_byte() {
-                    HSpollRes::PollEmpty(output_info.output_size)
+                    Ok(Poll::Empty(output_info.output_size))
                 } else {
-                    HSpollRes::PollMore(output_info.output_size)
+                    Ok(Poll::More(output_info.output_size))
                 };
             }
         }
     }
 
     /// Signal end of input.
-    pub fn finish(&self) -> HSfinishRes {
+    pub fn finish(&self) -> Finish {
         if self.input_size == 0 {
-            HSfinishRes::FinishDone
+            Finish::Done
         } else {
-            HSfinishRes::FinishMore
+            Finish::More
         }
     }
 

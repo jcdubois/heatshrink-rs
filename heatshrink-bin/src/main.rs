@@ -95,25 +95,25 @@ fn encode_with<const W: usize, const L: usize, const BUF: usize>(
         let mut input_bytes_processed = 0;
         while input_bytes_processed < input_bytes_read {
             match enc.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
-                heatshrink::HSsinkRes::SinkOK(n) => input_bytes_processed += n,
-                heatshrink::HSsinkRes::SinkFull => {}
-                heatshrink::HSsinkRes::SinkErrorMisuse => {
+                Ok(n) => input_bytes_processed += n,
+                Err(heatshrink::SinkError::Full) => {}
+                Err(heatshrink::SinkError::Misuse) => {
                     eprintln!("Error in HeatshrinkEncoder::sink()");
                     return Err(io::ErrorKind::Other.into());
                 }
             }
             loop {
                 match enc.poll(&mut output_buffer) {
-                    heatshrink::HSpollRes::PollMore(n) => {
+                    Ok(heatshrink::Poll::More(n)) => {
                         flush_output(output_file, &output_buffer[..n])?;
                         total_output_byte_size += n;
                     }
-                    heatshrink::HSpollRes::PollEmpty(n) => {
+                    Ok(heatshrink::Poll::Empty(n)) => {
                         flush_output(output_file, &output_buffer[..n])?;
                         total_output_byte_size += n;
                         break;
                     }
-                    heatshrink::HSpollRes::PollErrorMisuse => {
+                    Err(_) => {
                         eprintln!("Error in HeatshrinkEncoder::poll()");
                         return Err(io::ErrorKind::Other.into());
                     }
@@ -124,19 +124,19 @@ fn encode_with<const W: usize, const L: usize, const BUF: usize>(
         if input_bytes_read == 0 {
             loop {
                 match enc.finish() {
-                    heatshrink::HSfinishRes::FinishDone => break,
-                    heatshrink::HSfinishRes::FinishMore => loop {
+                    heatshrink::Finish::Done => break,
+                    heatshrink::Finish::More => loop {
                         match enc.poll(&mut output_buffer) {
-                            heatshrink::HSpollRes::PollMore(n) => {
+                            Ok(heatshrink::Poll::More(n)) => {
                                 flush_output(output_file, &output_buffer[..n])?;
                                 total_output_byte_size += n;
                             }
-                            heatshrink::HSpollRes::PollEmpty(n) => {
+                            Ok(heatshrink::Poll::Empty(n)) => {
                                 flush_output(output_file, &output_buffer[..n])?;
                                 total_output_byte_size += n;
                                 break;
                             }
-                            heatshrink::HSpollRes::PollErrorMisuse => {
+                            Err(_) => {
                                 eprintln!("Error in HeatshrinkEncoder::poll()");
                                 return Err(io::ErrorKind::Other.into());
                             }
@@ -167,8 +167,8 @@ fn decode_with<const W: usize, const L: usize, const I: usize, const WIN: usize>
 
         if input_bytes_read == 0 {
             match dec.finish() {
-                heatshrink::HSfinishRes::FinishDone => {}
-                heatshrink::HSfinishRes::FinishMore => {
+                heatshrink::Finish::Done => {}
+                heatshrink::Finish::More => {
                     eprintln!("Decoder has uninput_bytes_processed data at end of input");
                     return Err(io::ErrorKind::UnexpectedEof.into());
                 }
@@ -179,25 +179,25 @@ fn decode_with<const W: usize, const L: usize, const I: usize, const WIN: usize>
         let mut input_bytes_processed = 0;
         while input_bytes_processed < input_bytes_read {
             match dec.sink(&input_buffer[input_bytes_processed..input_bytes_read]) {
-                heatshrink::HSsinkRes::SinkOK(n) => input_bytes_processed += n,
-                heatshrink::HSsinkRes::SinkFull => {}
-                heatshrink::HSsinkRes::SinkErrorMisuse => {
+                Ok(n) => input_bytes_processed += n,
+                Err(heatshrink::SinkError::Full) => {}
+                Err(heatshrink::SinkError::Misuse) => {
                     eprintln!("Error in HeatshrinkDecoder::sink()");
                     return Err(io::ErrorKind::Other.into());
                 }
             }
             loop {
                 match dec.poll(&mut output_buffer) {
-                    heatshrink::HSpollRes::PollMore(n) => {
+                    Ok(heatshrink::Poll::More(n)) => {
                         flush_output(output_file, &output_buffer[..n])?;
                         total_output_byte_size += n;
                     }
-                    heatshrink::HSpollRes::PollEmpty(n) => {
+                    Ok(heatshrink::Poll::Empty(n)) => {
                         flush_output(output_file, &output_buffer[..n])?;
                         total_output_byte_size += n;
                         break;
                     }
-                    heatshrink::HSpollRes::PollErrorMisuse => {
+                    Err(_) => {
                         eprintln!("Error in HeatshrinkDecoder::poll()");
                         return Err(io::ErrorKind::Other.into());
                     }
@@ -253,7 +253,7 @@ fn dispatch_encode(
     input_file: &mut Box<dyn Read>,
     output_file: &mut Box<dyn Write>,
 ) -> Result<(usize, usize), io::Error> {
-    // BUF = 2 << W — all valid combinations W∈[4..=15], L∈[3..W-1)
+    // BUF = 2 << W — all valid combinations W [4..15], L [3..W-1)
     dispatch_encode!(
         w,
         l,
@@ -346,7 +346,7 @@ fn dispatch_decode(
     input_file: &mut Box<dyn Read>,
     output_file: &mut Box<dyn Write>,
 ) -> Result<(usize, usize), io::Error> {
-    // WIN = 1 << W, I fixed at 32 bytes — all valid combinations W∈[4..=15], L∈[3..W-1)
+    // WIN = 1 << W, I fixed at 32 bytes — all valid combinations W [4..15], L [3..W-1)
     dispatch_decode!(
         w,
         l,

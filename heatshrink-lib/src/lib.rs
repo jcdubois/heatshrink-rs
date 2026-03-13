@@ -70,40 +70,64 @@ pub type DefaultDecoder = decoder::HeatshrinkDecoder<
     256, // 1 << DEFAULT_WINDOW_BITS
 >;
 
-/// Return code for `sink()` calls.
-#[derive(Debug)]
-pub enum HSsinkRes {
-    /// Instance is not in the correct state (e.g. `sink()` called after `finish()`).
-    SinkErrorMisuse,
-    /// Internal buffer is full; no data was added. Drain with `poll()` first.
-    SinkFull,
-    /// Data successfully added. Value is the number of bytes consumed.
-    SinkOK(usize),
-}
-
-/// Return code for `poll()` calls.
+/// Error returned by [`encoder::HeatshrinkEncoder::sink`] and
+/// [`decoder::HeatshrinkDecoder::sink`].
 #[derive(Debug, PartialEq, Eq)]
-pub enum HSpollRes {
-    /// Invalid call (e.g. empty output buffer).
-    PollErrorMisuse,
-    /// Output buffer is full; more data is available. Value is bytes written.
-    PollMore(usize),
-    /// Internal buffer fully drained. Value is bytes written.
-    PollEmpty(usize),
+pub enum SinkError {
+    /// Internal buffer is full; no data was consumed. Drain with `poll()` first.
+    Full,
+    /// API misuse: `sink()` called in the wrong state (e.g. after `finish()`).
+    Misuse,
 }
 
-/// Return code for `finish()` calls.
-#[derive(Debug)]
-pub enum HSfinishRes {
-    /// More data remains; call `poll()` then `finish()` again.
-    FinishMore,
-    /// Stream is complete.
-    FinishDone,
+/// Error returned by [`encoder::HeatshrinkEncoder::poll`] and
+/// [`decoder::HeatshrinkDecoder::poll`].
+///
+/// Only one variant exists: passing an empty output buffer is always a
+/// programming error.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PollError {
+    /// API misuse: `poll()` was called with an empty output buffer.
+    Misuse,
 }
 
-/// Error returned by [`encoder::encode`] and [`decoder::decode`].
+/// Outcome of a successful [`encoder::HeatshrinkEncoder::poll`] or
+/// [`decoder::HeatshrinkDecoder::poll`] call.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Poll {
+    /// Output buffer is full; more compressed/decompressed data is available.
+    /// Value is the number of bytes written into the output buffer.
+    More(usize),
+    /// Internal state is fully drained for now.
+    /// Value is the number of bytes written into the output buffer.
+    Empty(usize),
+}
+
+impl Poll {
+    /// Number of bytes written into the output buffer, regardless of variant.
+    #[inline]
+    pub fn bytes_written(&self) -> usize {
+        match self {
+            Poll::More(n) | Poll::Empty(n) => *n,
+        }
+    }
+}
+
+/// Outcome of a [`encoder::HeatshrinkEncoder::finish`] or
+/// [`decoder::HeatshrinkDecoder::finish`] call.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Finish {
+    /// Stream is complete; no further `poll()` calls are needed.
+    Done,
+    /// More output remains; call `poll()` until it returns [`Poll::Empty`],
+    /// then call `finish()` again.
+    More,
+}
+
+/// Error returned by the convenience functions [`encoder::encode`] and
+/// [`decoder::decode`].
 #[derive(Debug)]
-pub enum HSError {
+pub enum EncodeError {
     /// Output buffer was too small to hold the result.
     OutputFull,
     /// Internal error (should not occur in normal use).
@@ -230,6 +254,7 @@ mod test {
 #[cfg(test)]
 mod test_streaming {
     use super::*;
+    use super::{Poll, SinkError};
     use decoder::HeatshrinkDecoder;
     use encoder::HeatshrinkEncoder;
 
@@ -245,23 +270,23 @@ mod test_streaming {
         loop {
             if total_in < src.len() {
                 match enc.sink(&src[total_in..]) {
-                    HSsinkRes::SinkOK(n) => total_in += n,
-                    HSsinkRes::SinkFull => {}
-                    HSsinkRes::SinkErrorMisuse => panic!("encoder sink misuse"),
+                    Ok(n) => total_in += n,
+                    Err(SinkError::Full) => {}
+                    Err(SinkError::Misuse) => panic!("encoder sink misuse"),
                 }
             }
             if total_in == src.len() {
                 enc.finish();
             }
             match enc.poll(&mut dst[total_out..]) {
-                HSpollRes::PollMore(n) => total_out += n,
-                HSpollRes::PollEmpty(n) => {
+                Ok(Poll::More(n)) => total_out += n,
+                Ok(Poll::Empty(n)) => {
                     total_out += n;
                     if total_in == src.len() {
                         break;
                     }
                 }
-                HSpollRes::PollErrorMisuse => panic!("encoder poll misuse"),
+                Err(_) => panic!("encoder poll misuse"),
             }
         }
         total_out
@@ -297,20 +322,20 @@ mod test_streaming {
             );
             if total_in < encoded.len() {
                 match dec.sink(&encoded[total_in..]) {
-                    HSsinkRes::SinkOK(n) => total_in += n,
-                    HSsinkRes::SinkFull => {}
-                    HSsinkRes::SinkErrorMisuse => panic!("decoder sink misuse"),
+                    Ok(n) => total_in += n,
+                    Err(SinkError::Full) => {}
+                    Err(SinkError::Misuse) => panic!("decoder sink misuse"),
                 }
             }
             match dec.poll(&mut dst[total_out..]) {
-                HSpollRes::PollMore(n) => total_out += n,
-                HSpollRes::PollEmpty(n) => {
+                Ok(Poll::More(n)) => total_out += n,
+                Ok(Poll::Empty(n)) => {
                     total_out += n;
                     if total_in == encoded.len() {
                         break;
                     }
                 }
-                HSpollRes::PollErrorMisuse => panic!("decoder poll misuse"),
+                Err(_) => panic!("decoder poll misuse"),
             }
         }
         total_out
