@@ -1,6 +1,5 @@
 use super::EncodeError;
 use super::Finish;
-use super::OutputInfo;
 use super::Poll;
 use super::PollError;
 use super::SinkError;
@@ -186,7 +185,7 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
             return Err(PollError::Misuse);
         }
 
-        let mut output_info = OutputInfo::new(output_buffer);
+        let mut out_pos: usize = 0;
 
         loop {
             let previous_state = self.state;
@@ -196,7 +195,7 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
                     self.state = self.st_tag_bit();
                 }
                 HSDstate::YieldLiteral => {
-                    self.state = self.st_yield_literal(&mut output_info);
+                    self.state = self.st_yield_literal(output_buffer, &mut out_pos);
                 }
                 HSDstate::BackrefIndexMsb => {
                     self.state = self.st_backref_index_msb();
@@ -208,15 +207,15 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
                     self.state = self.st_backref_count_lsb();
                 }
                 HSDstate::YieldBackref => {
-                    self.state = self.st_yield_backref(&mut output_info);
+                    self.state = self.st_yield_backref(output_buffer, &mut out_pos);
                 }
             }
 
             if self.state == previous_state {
-                return if output_info.can_take_byte() {
-                    Ok(Poll::Empty(output_info.output_size))
+                return if out_pos < output_buffer.len() {
+                    Ok(Poll::Empty(out_pos))
                 } else {
-                    Ok(Poll::More(output_info.output_size))
+                    Ok(Poll::More(out_pos))
                 };
             }
         }
@@ -250,15 +249,16 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
     }
 
     #[inline]
-    fn st_yield_literal(&mut self, output_info: &mut OutputInfo) -> HSDstate {
-        if output_info.can_take_byte() {
+    fn st_yield_literal(&mut self, out: &mut [u8], pos: &mut usize) -> HSDstate {
+        if *pos < out.len() {
             match self.get_bits(8) {
                 None => HSDstate::YieldLiteral,
                 Some(c) => {
                     let c = c as u8;
                     self.output_buffer[self.head_index % WIN] = c;
                     self.head_index += 1;
-                    output_info.push_byte(c);
+                    out[*pos] = c;
+                    *pos += 1;
                     HSDstate::TagBit
                 }
             }
@@ -309,15 +309,13 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
     }
 
     #[inline]
-    fn st_yield_backref(&mut self, output_info: &mut OutputInfo) -> HSDstate {
-        if !output_info.can_take_byte() {
+    fn st_yield_backref(&mut self, out: &mut [u8], pos: &mut usize) -> HSDstate {
+        if *pos == out.len() {
             return HSDstate::YieldBackref;
         }
 
         let output_index = self.output_index;
-        let count = output_info
-            .remaining_free_size()
-            .min(self.output_count as usize);
+        let count = (out.len() - *pos).min(self.output_count as usize);
 
         // Prologue: back-reference points before the start of the stream
         // (output_index > head_index).  Emit zeroes — rare, only at the very
@@ -326,7 +324,8 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
             let zero_count = count.min(output_index - self.head_index);
             let limit = self.head_index + zero_count;
             while self.head_index < limit {
-                output_info.push_byte(0);
+                out[*pos] = 0;
+                *pos += 1;
                 self.output_buffer[self.head_index & (WIN - 1)] = 0;
                 self.head_index += 1;
             }
@@ -334,15 +333,13 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
             if self.output_count == 0 {
                 return HSDstate::TagBit;
             }
-            if !output_info.can_take_byte() {
+            if *pos == out.len() {
                 return HSDstate::YieldBackref;
             }
         }
 
         // How many bytes remain to emit in this call.
-        let count = output_info
-            .remaining_free_size()
-            .min(self.output_count as usize);
+        let count = (out.len() - *pos).min(self.output_count as usize);
 
         if output_index >= count {
             // ── Fast path: no self-referential overlap ────────────────────────
@@ -364,7 +361,7 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
                     .copy_within(src_start..src_start + count, dst_start);
             } else {
                 // At least one side wraps: copy byte by byte into the ring but
-                // still avoid the output_info.push_byte loop below by handling
+                // still avoid the byte-by-byte loop below by handling
                 // the ring copy first, then using a slice copy for the caller.
                 let limit = self.head_index + count;
                 let mut h = self.head_index;
@@ -379,19 +376,16 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
             // --- bulk copy from the (now updated) ring to the caller's buffer --
             // dst_start is where we just wrote `count` bytes (possibly wrapping).
             // Re-read from the ring to the output slice in 1 or 2 chunks.
-            let out_pos = output_info.output_size;
             if dst_end <= WIN {
-                output_info.output_buffer[out_pos..out_pos + count]
+                out[*pos..*pos + count]
                     .copy_from_slice(&self.output_buffer[dst_start..dst_start + count]);
             } else {
                 let first = WIN - dst_start;
                 let second = count - first;
-                output_info.output_buffer[out_pos..out_pos + first]
-                    .copy_from_slice(&self.output_buffer[dst_start..WIN]);
-                output_info.output_buffer[out_pos + first..out_pos + count]
-                    .copy_from_slice(&self.output_buffer[..second]);
+                out[*pos..*pos + first].copy_from_slice(&self.output_buffer[dst_start..WIN]);
+                out[*pos + first..*pos + count].copy_from_slice(&self.output_buffer[..second]);
             }
-            output_info.output_size += count;
+            *pos += count;
             self.head_index += count;
         } else {
             // ── Slow path: self-referential match (output_index < count) ──────
@@ -401,7 +395,8 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
             let limit = self.head_index + count;
             while self.head_index < limit {
                 let c = self.output_buffer[(self.head_index - output_index) & (WIN - 1)];
-                output_info.push_byte(c);
+                out[*pos] = c;
+                *pos += 1;
                 self.output_buffer[self.head_index & (WIN - 1)] = c;
                 self.head_index += 1;
             }

@@ -722,3 +722,185 @@ impl Read for SliceSource<'_> {
         Ok(n)
     }
 }
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[cfg(feature = "embedded-io")]
+mod test_io {
+    use super::{
+        DecoderReader, DecoderWriter, EncoderReader, EncoderWriter, SliceSink, SliceSource,
+    };
+    use crate::{DefaultDecoder, DefaultEncoder};
+    use embedded_io::{Read as _, Write as _};
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// Compress `src` via EncoderWriter into a heap-less slice, return byte count.
+    fn ew_compress(src: &[u8], dst: &mut [u8]) -> usize {
+        let mut sink = SliceSink::new(dst);
+        let mut w: EncoderWriter<_, DefaultEncoder> = EncoderWriter::new(&mut sink);
+        w.write_all(src).unwrap();
+        w.finish().unwrap();
+        sink.len()
+    }
+
+    /// Decompress `src` via DecoderWriter into a slice, return byte count.
+    fn dw_decompress(src: &[u8], dst: &mut [u8]) -> usize {
+        let mut sink = SliceSink::new(dst);
+        let mut w: DecoderWriter<_, DefaultDecoder> = DecoderWriter::new(&mut sink);
+        w.write_all(src).unwrap();
+        w.finish().unwrap();
+        sink.len()
+    }
+
+    /// Decompress `src` via DecoderReader into a slice, return byte count.
+    fn dr_decompress(src: &[u8], dst: &mut [u8]) -> usize {
+        let source = SliceSource::new(src);
+        let mut r: DecoderReader<_, DefaultDecoder> = DecoderReader::new(source);
+        let mut total = 0;
+        loop {
+            let n = r.read(&mut dst[total..]).unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        total
+    }
+
+    /// Compress `src` via EncoderReader into a slice, return byte count.
+    fn er_compress(src: &[u8], dst: &mut [u8]) -> usize {
+        let source = SliceSource::new(src);
+        let mut r: EncoderReader<_, DefaultEncoder> = EncoderReader::new(source);
+        let mut total = 0;
+        loop {
+            let n = r.read(&mut dst[total..]).unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        total
+    }
+
+    // ── round-trip tests ─────────────────────────────────────────────────────
+
+    /// EncoderWriter → DecoderWriter round-trip.
+    #[test]
+    fn writer_roundtrip_short() {
+        let src = b"hello heatshrink embedded-io";
+        let mut compressed = [0u8; 256];
+        let mut decompressed = [0u8; 256];
+        let n_enc = ew_compress(src, &mut compressed);
+        let n_dec = dw_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(src, &decompressed[..n_dec]);
+    }
+
+    /// EncoderWriter → DecoderWriter round-trip with repetitive data (back-refs).
+    #[test]
+    fn writer_roundtrip_repetitive() {
+        let src: [u8; 4096] = core::array::from_fn(|i| (i % 251) as u8);
+        let mut compressed = [0u8; 4096];
+        let mut decompressed = [0u8; 4096];
+        let n_enc = ew_compress(&src, &mut compressed);
+        let n_dec = dw_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(&src[..], &decompressed[..n_dec]);
+    }
+
+    /// EncoderWriter → DecoderWriter round-trip with pseudo-random data (literals).
+    #[test]
+    fn writer_roundtrip_random() {
+        let src: [u8; 4096] = core::array::from_fn(|i| {
+            (i.wrapping_mul(6364136223846793005usize)
+                .wrapping_add(1442695040888963407)
+                >> 56) as u8
+        });
+        let mut compressed = [0u8; 8192];
+        let mut decompressed = [0u8; 8192];
+        let n_enc = ew_compress(&src, &mut compressed);
+        let n_dec = dw_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(&src[..], &decompressed[..n_dec]);
+    }
+
+    /// EncoderWriter → DecoderReader round-trip.
+    #[test]
+    fn writer_reader_roundtrip() {
+        let src = b"the quick brown fox jumps over the lazy dog";
+        let mut compressed = [0u8; 256];
+        let mut decompressed = [0u8; 256];
+        let n_enc = ew_compress(src, &mut compressed);
+        let n_dec = dr_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(src, &decompressed[..n_dec]);
+    }
+
+    /// EncoderReader → DecoderWriter round-trip.
+    #[test]
+    fn reader_writer_roundtrip() {
+        let src = b"the quick brown fox jumps over the lazy dog";
+        let mut compressed = [0u8; 256];
+        let mut decompressed = [0u8; 256];
+        let n_enc = er_compress(src, &mut compressed);
+        let n_dec = dw_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(src, &decompressed[..n_dec]);
+    }
+
+    /// EncoderReader → DecoderReader round-trip.
+    #[test]
+    fn reader_reader_roundtrip() {
+        let src: [u8; 4096] = core::array::from_fn(|i| (i % 251) as u8);
+        let mut compressed = [0u8; 4096];
+        let mut decompressed = [0u8; 4096];
+        let n_enc = er_compress(&src, &mut compressed);
+        let n_dec = dr_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(&src[..], &decompressed[..n_dec]);
+    }
+
+    /// Small caller buffer forces the Read adapters to exercise the internal
+    /// output buffer (out_start / out_end bookkeeping).
+    #[test]
+    fn reader_small_output_buf() {
+        let src: [u8; 512] = core::array::from_fn(|i| (i % 137) as u8);
+        let mut compressed = [0u8; 1024];
+        let mut decompressed = [0u8; 1024];
+
+        // Compress with EncoderReader, read 1 byte at a time.
+        let source = SliceSource::new(&src);
+        let mut r: EncoderReader<_, DefaultEncoder> = EncoderReader::new(source);
+        let mut n_enc = 0;
+        loop {
+            let n = r.read(&mut compressed[n_enc..n_enc + 1]).unwrap();
+            if n == 0 {
+                break;
+            }
+            n_enc += n;
+        }
+
+        // Decompress with DecoderReader, read 3 bytes at a time.
+        let source2 = SliceSource::new(&compressed[..n_enc]);
+        let mut r2: DecoderReader<_, DefaultDecoder> = DecoderReader::new(source2);
+        let mut n_dec = 0;
+        let mut tmp = [0u8; 3];
+        loop {
+            let n = r2.read(&mut tmp).unwrap();
+            if n == 0 {
+                break;
+            }
+            decompressed[n_dec..n_dec + n].copy_from_slice(&tmp[..n]);
+            n_dec += n;
+        }
+
+        assert_eq!(&src[..], &decompressed[..n_dec]);
+    }
+
+    /// Empty input must produce a valid (empty) round-trip.
+    #[test]
+    fn writer_roundtrip_empty() {
+        let src: &[u8] = &[];
+        let mut compressed = [0u8; 64];
+        let mut decompressed = [0u8; 64];
+        let n_enc = ew_compress(src, &mut compressed);
+        let n_dec = dw_decompress(&compressed[..n_enc], &mut decompressed);
+        assert_eq!(src, &decompressed[..n_dec]);
+    }
+}

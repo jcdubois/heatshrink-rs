@@ -1,6 +1,5 @@
 use super::EncodeError;
 use super::Finish;
-use super::OutputInfo;
 use super::Poll;
 use super::PollError;
 use super::SinkError;
@@ -197,13 +196,13 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
             return Err(PollError::Misuse);
         }
 
-        let mut output_info = OutputInfo::new(output_buffer);
+        let mut out_pos: usize = 0;
 
         loop {
             let previous_state = self.state;
 
             match previous_state {
-                HSEstate::NotFull => return Ok(Poll::Empty(output_info.output_size)),
+                HSEstate::NotFull => return Ok(Poll::Empty(out_pos)),
                 HSEstate::Filled => {
                     self.do_indexing();
                     self.state = HSEstate::Search;
@@ -212,29 +211,29 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
                     self.state = self.st_step_search();
                 }
                 HSEstate::YieldTagBit => {
-                    self.state = self.st_yield_tag_bit(&mut output_info);
+                    self.state = self.st_yield_tag_bit(output_buffer, &mut out_pos);
                 }
                 HSEstate::YieldLiteral => {
-                    self.state = self.st_yield_literal(&mut output_info);
+                    self.state = self.st_yield_literal(output_buffer, &mut out_pos);
                 }
                 HSEstate::YieldBrIndex => {
-                    self.state = self.st_yield_br_index(&mut output_info);
+                    self.state = self.st_yield_br_index(output_buffer, &mut out_pos);
                 }
                 HSEstate::YieldBrLength => {
-                    self.state = self.st_yield_br_length(&mut output_info);
+                    self.state = self.st_yield_br_length(output_buffer, &mut out_pos);
                 }
                 HSEstate::SaveBacklog => {
                     self.state = self.st_save_backlog();
                 }
                 HSEstate::FlushBits => {
-                    self.state = self.st_flush_bit_buffer(&mut output_info);
-                    return Ok(Poll::Empty(output_info.output_size));
+                    self.state = self.st_flush_bit_buffer(output_buffer, &mut out_pos);
+                    return Ok(Poll::Empty(out_pos));
                 }
-                HSEstate::Done => return Ok(Poll::Empty(output_info.output_size)),
+                HSEstate::Done => return Ok(Poll::Empty(out_pos)),
             }
 
-            if self.state == previous_state && !output_info.can_take_byte() {
-                return Ok(Poll::More(output_info.output_size));
+            if self.state == previous_state && out_pos == output_buffer.len() {
+                return Ok(Poll::More(out_pos));
             }
         }
     }
@@ -292,13 +291,13 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn st_yield_tag_bit(&mut self, output_info: &mut OutputInfo) -> HSEstate {
-        if output_info.can_take_byte() {
+    fn st_yield_tag_bit(&mut self, out: &mut [u8], pos: &mut usize) -> HSEstate {
+        if *pos < out.len() {
             if self.match_length == 0 {
-                self.add_tag_bit(output_info, 0x1);
+                self.add_tag_bit(out, pos, 0x1);
                 HSEstate::YieldLiteral
             } else {
-                self.add_tag_bit(output_info, 0);
+                self.add_tag_bit(out, pos, 0);
                 self.outgoing_bits = self.match_position as u16 - 1;
                 self.outgoing_bits_count = W as u8;
                 HSEstate::YieldBrIndex
@@ -309,9 +308,9 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn st_yield_literal(&mut self, output_info: &mut OutputInfo) -> HSEstate {
-        if output_info.can_take_byte() {
-            self.push_literal_byte(output_info);
+    fn st_yield_literal(&mut self, out: &mut [u8], pos: &mut usize) -> HSEstate {
+        if *pos < out.len() {
+            self.push_literal_byte(out, pos);
             HSEstate::Search
         } else {
             HSEstate::YieldLiteral
@@ -319,9 +318,9 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn st_yield_br_index(&mut self, output_info: &mut OutputInfo) -> HSEstate {
-        if output_info.can_take_byte() {
-            if self.push_outgoing_bits(output_info) > 0 {
+    fn st_yield_br_index(&mut self, out: &mut [u8], pos: &mut usize) -> HSEstate {
+        if *pos < out.len() {
+            if self.push_outgoing_bits(out, pos) > 0 {
                 HSEstate::YieldBrIndex
             } else {
                 self.outgoing_bits = self.match_length as u16 - 1;
@@ -334,9 +333,9 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn st_yield_br_length(&mut self, output_info: &mut OutputInfo) -> HSEstate {
-        if output_info.can_take_byte() {
-            if self.push_outgoing_bits(output_info) > 0 {
+    fn st_yield_br_length(&mut self, out: &mut [u8], pos: &mut usize) -> HSEstate {
+        if *pos < out.len() {
+            if self.push_outgoing_bits(out, pos) > 0 {
                 HSEstate::YieldBrLength
             } else {
                 self.match_scan_index += self.match_length;
@@ -355,11 +354,12 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn st_flush_bit_buffer(&self, output_info: &mut OutputInfo) -> HSEstate {
+    fn st_flush_bit_buffer(&self, out: &mut [u8], pos: &mut usize) -> HSEstate {
         if self.bit_index == 8 {
             HSEstate::Done
-        } else if output_info.can_take_byte() {
-            output_info.push_byte(self.current_byte);
+        } else if *pos < out.len() {
+            out[*pos] = self.current_byte;
+            *pos += 1;
             HSEstate::Done
         } else {
             HSEstate::FlushBits
@@ -367,8 +367,8 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn add_tag_bit(&mut self, output_info: &mut OutputInfo, tag: u8) {
-        self.push_bits(1, tag, output_info)
+    fn add_tag_bit(&mut self, out: &mut [u8], pos: &mut usize, tag: u8) {
+        self.push_bits(1, tag, out, pos)
     }
 
     #[inline]
@@ -502,7 +502,7 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn push_outgoing_bits(&mut self, output_info: &mut OutputInfo) -> u8 {
+    fn push_outgoing_bits(&mut self, out: &mut [u8], pos: &mut usize) -> u8 {
         let (count, bits) = if self.outgoing_bits_count > 8 {
             (
                 8u8,
@@ -512,24 +512,26 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
             (self.outgoing_bits_count, self.outgoing_bits as u8)
         };
         if count > 0 {
-            self.push_bits(count, bits, output_info);
+            self.push_bits(count, bits, out, pos);
             self.outgoing_bits_count -= count;
         }
         count
     }
 
     #[inline]
-    fn push_bits(&mut self, count: u8, bits: u8, output_info: &mut OutputInfo) {
+    fn push_bits(&mut self, count: u8, bits: u8, out: &mut [u8], pos: &mut usize) {
         debug_assert!(count > 0 && count <= 8);
         // Fast path: pushing a full aligned byte (the common case for literals).
         if count == 8 && self.bit_index == 8 {
-            output_info.push_byte(bits);
+            out[*pos] = bits;
+            *pos += 1;
             return;
         }
         if count >= self.bit_index {
             let shift = count - self.bit_index;
             let tmp_byte = self.current_byte | (bits >> shift);
-            output_info.push_byte(tmp_byte);
+            out[*pos] = tmp_byte;
+            *pos += 1;
             self.bit_index = 8 - shift;
             self.current_byte = if shift == 0 {
                 0
@@ -543,9 +545,9 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
     }
 
     #[inline]
-    fn push_literal_byte(&mut self, output_info: &mut OutputInfo) {
+    fn push_literal_byte(&mut self, out: &mut [u8], pos: &mut usize) {
         let byte = self.input_buffer[self.get_input_offset() + self.match_scan_index - 1];
-        self.push_bits(8, byte, output_info);
+        self.push_bits(8, byte, out, pos);
     }
 
     #[inline]
