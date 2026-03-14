@@ -15,10 +15,11 @@
  path = "src/main.rs"
 
 [dependencies]
-heatshrink-lib = { version = "1.0.0", path = "../heatshrink-lib" }
+heatshrink-lib = { version = "1.0.0", path = "../heatshrink-lib", default-features = false }
 clap.workspace = true
 
 [features]
 heatshrink-use-index = ["heatshrink-lib/heatshrink-use-index"]
+default = ["heatshrink-use-index"]  # comportement inchangé par défaut
 
 [dev-dependencies]

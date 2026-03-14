@@ -1,81 +1,220 @@
 # heatshrink-rs
-Minimal no_std implementation of Heatshrink compression &amp; decompression
-for embedded systems
 
-This library is a "crude" port to RUST of the original [heatshrink C library].
+A `no_std` Rust implementation of [Heatshrink] compression and decompression
+for embedded systems.
 
-[heatshrink C library]: https://github.com/atomicobject/heatshrink.
+Heatshrink is an [LZSS]-based algorithm designed for low-memory environments.
+It operates with bounded, incremental CPU use, making it suitable for hard
+real-time systems.
 
-The port is limited to the "static" version of the C library which means
-heatshrink parameters are hardcoded to window_sz2 = 8 and lookahead_sz2 = 4.
+[Heatshrink]: https://github.com/atomicobject/heatshrink
+[LZSS]: https://en.wikipedia.org/wiki/Lempel-Ziv-Storer-Szymanski
 
-It is not (yet?) possible to choose its own compression parameters (mainly because it is a no_std library and therefore it does not support dynamic allocation).
+## Features
 
-## Key Features:
+- **`no_std`, no allocator required** — runs on bare-metal targets.
+- **Configurable parameters** — window size `W` and lookahead `L` are const
+  generics; any valid `(W, L)` combination can be used at zero runtime cost.
+- **Idiomatic Rust API** — `sink`, `poll`, and `finish` return `Result` types;
+  no C-style return codes.
+- **Optional search index** — enable the `heatshrink-use-index` feature to
+  significantly speed up compression at the cost of extra memory.
+- **`embedded-io` adapters** — enable the `embedded-io` feature to use the
+  encoder and decoder as `Read`/`Write` streams in `embedded-io` pipelines.
+- **ISC licence** — free to use, including for commercial purposes.
 
-- **Low memory usage:**
-    It is useful for many general cases with small memory.
-- **Incremental, bounded CPU use:**
-    You can chew on input data in arbitrarily tiny bites.
-    This is a useful property in hard real-time environments.
-- **For now you are limited to the static version because of no_std:**
-    No dynamic allocation is used.
-- **ISC license:**
-    You can use it freely, even for commercial purposes.
+## Parameters
 
-## Getting Started:
+Both the encoder and decoder are parameterised by const generics:
 
-### Basic Usage
+| Parameter | Description | Constraints |
+|-----------|-------------|-------------|
+| `W` | Base-2 log of the LZSS sliding window size | 4 ≤ W ≤ 15 |
+| `L` | Number of bits for back-reference lengths | 3 ≤ L < W |
+| `BUF` | Encoder input buffer size (= `2 << W`) | Must equal `2 << W` |
+| `I` | Decoder streaming input buffer size | ≥ 1 |
+| `WIN` | Decoder window buffer size (= `1 << W`) | Must equal `1 << W` |
 
-1. Allocate a heatshrink encoder or heatshrink decoder state machine using
-either `HeatshrinkEncoder::new` or `HeatshrinkDecoder::new`. You can also
-reset an existing state machine by calling the `reset` function on the state
-machine.
+`BUF` and `WIN` are redundant parameters required by a current Rust stable
+limitation: arithmetic expressions are not yet allowed in const-generic array
+sizes. Always set `BUF = 2 << W` and `WIN = 1 << W`.
 
-2. Use `sink` to sink an input buffer into the state machine. In the
-returned result you get a CR code and the amount of bytes that were actually
-consumed (If 0 bytes were conusmed, the buffer is full.).
+The convenience type aliases [`DefaultEncoder`] and [`DefaultDecoder`] use
+`W=8, L=4` to match the original C library defaults.
 
-3. Use `poll` to move output from the state machine into an output
-buffer. In the returned result you get a CR code and the amount bytes
-that were writen to the provided buffer.
+## Quick Start
 
-Repeat steps 2 and 3 to stream data through the state machine. Since
-it's doing data compression, the input and output sizes can vary
-significantly. Looping will be necessary to buffer the input and output
-as the data is processed.
+### Convenience functions (single-call, buffer-to-buffer)
 
-4. When the end of the input stream is reached, call `finish` to notify
-the state machine that no more input is available. The return value from
-`finish` will indicate whether any output remains. if so, call `poll` to
-get more.
+```rust
+use heatshrink::{encoder, decoder};
 
-Continue calling `finish` and `poll`ing to flush remaining output until
-`finish` indicates that the output has been exhausted.
+let input = b"hello heatshrink";
+let mut compressed   = [0u8; 64];
+let mut decompressed = [0u8; 64];
 
-Sinking more data after `finish` has been called will not work without
-calling `reset` on the state machine.
+let encoded = encoder::encode(input, &mut compressed).unwrap();
+let decoded = decoder::decode(encoded, &mut decompressed).unwrap();
 
-## Configuration
+assert_eq!(input, decoded);
+```
 
-No configuration is needed (for now) on this RUST implementation as
-parameters are not user defined (they are hardcoded).
+### Streaming API
 
-On the cargo build command you can choose to enable the lookup table to
-speed up the compression phase by selecting --features "heatshrink-use-index"
-on the cargo command line.
+Use the streaming API when processing data in chunks or when working under
+tight memory constraints.
 
-## More Information and Benchmarks:
+```rust
+use heatshrink::{DefaultEncoder, DefaultDecoder, Poll, SinkError, Finish};
 
-heatshrink is based on [LZSS], since it's particularly suitable for
-compression in small amounts of memory. It can use an optional, small
-[index] to make compression significantly faster, but otherwise can run
-in under 100 bytes of memory. The index currently adds 2^(window size+1)
-bytes to memory usage for compression, and temporarily allocates 512
-bytes on the stack during index construction (if the index is enabled).
+// ── Encoding ──────────────────────────────────────────────────────────────────
+let input = b"hello heatshrink - streaming example";
+let mut compressed = [0u8; 128];
+let mut enc = DefaultEncoder::new();
+let mut total_in  = 0;
+let mut total_out = 0;
 
-For more information, see the [blog post] for an overview.
+loop {
+    if total_in < input.len() {
+        match enc.sink(&input[total_in..]) {
+            Ok(n)                  => total_in += n,
+            Err(SinkError::Full)   => {}   // drain with poll() first
+            Err(SinkError::Misuse) => panic!("sink after finish"),
+        }
+    }
+    if total_in == input.len() {
+        enc.finish();
+    }
+    match enc.poll(&mut compressed[total_out..]) {
+        Ok(Poll::More(n))  => total_out += n,
+        Ok(Poll::Empty(n)) => {
+            total_out += n;
+            if total_in == input.len() { break; }
+        }
+        Err(_) => panic!("empty output buffer"),
+    }
+}
 
-[blog post]: http://spin.atomicobject.com/2013/03/14/heatshrink-embedded-data-compression/
-[index]: http://spin.atomicobject.com/2014/01/13/lightweight-indexing-for-embedded-systems/
-[LZSS]: http://en.wikipedia.org/wiki/Lempel-Ziv-Storer-Szymanski
+// ── Decoding ──────────────────────────────────────────────────────────────────
+let mut decompressed = [0u8; 128];
+let mut dec = DefaultDecoder::new();
+let mut dec_in  = 0;
+let mut dec_out = 0;
+
+loop {
+    if dec_in < total_out {
+        match dec.sink(&compressed[dec_in..total_out]) {
+            Ok(n)                  => dec_in += n,
+            Err(SinkError::Full)   => {}
+            Err(SinkError::Misuse) => panic!(),
+        }
+    }
+    match dec.poll(&mut decompressed[dec_out..]) {
+        Ok(Poll::More(n))  => dec_out += n,
+        Ok(Poll::Empty(n)) => {
+            dec_out += n;
+            if dec_in == total_out { break; }
+        }
+        Err(_) => panic!("empty output buffer"),
+    }
+}
+
+assert_eq!(&input[..], &decompressed[..dec_out]);
+```
+
+### Custom parameters
+
+```rust
+use heatshrink::{encoder::HeatshrinkEncoder, decoder::HeatshrinkDecoder};
+
+// W=11, L=6 — BUF = 2<<11 = 4096, WIN = 1<<11 = 2048
+type MyEncoder = HeatshrinkEncoder<11, 6, 4096>;
+type MyDecoder = HeatshrinkDecoder<11, 6, 32, 2048>;
+```
+
+## `embedded-io` adapters
+
+Enable the `embedded-io` feature to use the encoder and decoder as
+`embedded_io::Read` and `embedded_io::Write` streams:
+
+```toml
+[dependencies]
+heatshrink-lib = { version = "...", features = ["embedded-io"] }
+```
+
+Four adapters are available in the `heatshrink::io` module:
+
+| Adapter | Trait | Direction |
+|---------|-------|-----------|
+| `EncoderWriter<W, ENC>` | `Write` | Compress bytes written in → forward to inner `Write` |
+| `DecoderWriter<W, DEC>` | `Write` | Decompress bytes written in → forward to inner `Write` |
+| `EncoderReader<R, ENC>` | `Read`  | Read compressed bytes ← pull raw bytes from inner `Read` |
+| `DecoderReader<R, DEC>` | `Read`  | Read decompressed bytes ← pull compressed bytes from inner `Read` |
+
+Call `finish()` on the `Write` adapters when all data has been written.
+
+```rust
+# #[cfg(feature = "embedded-io")] {
+use heatshrink::io::{EncoderWriter, DecoderWriter, SliceSink};
+use heatshrink::{DefaultEncoder, DefaultDecoder};
+use embedded_io::Write as _;
+
+let input = b"hello heatshrink embedded-io";
+let mut compressed   = [0u8; 64];
+let mut decompressed = [0u8; 64];
+
+// Compress
+let mut sink = SliceSink::new(&mut compressed);
+let mut enc: EncoderWriter<_, DefaultEncoder> = EncoderWriter::new(&mut sink);
+enc.write_all(input).unwrap();
+enc.finish().unwrap();
+let n_enc = sink.len();
+
+// Decompress
+let mut sink2 = SliceSink::new(&mut decompressed);
+let mut dec: DecoderWriter<_, DefaultDecoder> = DecoderWriter::new(&mut sink2);
+dec.write_all(&compressed[..n_enc]).unwrap();
+dec.finish().unwrap();
+
+assert_eq!(input, sink2.written());
+# }
+```
+
+## Cargo features
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `heatshrink-use-index` | ✓ | Enable the search index for faster compression |
+| `embedded-io` | ✗ | Enable `embedded_io::Read`/`Write` adapters |
+
+## Memory usage
+
+With the default parameters `W=8, L=4` (measured with `core::mem::size_of`):
+
+| Configuration | `DefaultEncoder` | `DefaultDecoder` |
+|---------------|-----------------|-----------------|
+| Without `heatshrink-use-index` | 552 bytes | 328 bytes |
+| With `heatshrink-use-index` | 1576 bytes | 328 bytes |
+
+The search index adds `2 << W` × 2 bytes to the encoder: for W=8 that is
+512 × 2 = 1024 bytes. Larger window sizes grow the index proportionally —
+at W=14 the index alone occupies 32 KB.
+
+## Migrating from 0.4.x
+
+Version 0.4.x had hardcoded parameters (`W=8, L=4`) and C-style return codes.
+The current API differs in the following ways:
+
+- **Parameters are now const generics.** Use `DefaultEncoder` / `DefaultDecoder`
+  to keep the previous behaviour, or choose any `(W, L)` pair.
+- **`sink()` returns `Result<usize, SinkError>`** instead of `HSsinkRes`.
+- **`poll()` returns `Result<Poll, PollError>`** instead of `HSpollRes`.
+- **`finish()` returns `Finish`** instead of `HSfinishRes`.
+- **`encode()` / `decode()` return `Result<&[u8], CodecError>`** instead of
+  `Result<&[u8], HSError>`.
+
+## More information
+
+- [Blog post: Heatshrink overview](http://spin.atomicobject.com/2013/03/14/heatshrink-embedded-data-compression/)
+- [Blog post: Lightweight indexing](http://spin.atomicobject.com/2014/01/13/lightweight-indexing-for-embedded-systems/)
+- [Original C library](https://github.com/atomicobject/heatshrink)

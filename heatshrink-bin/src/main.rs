@@ -490,3 +490,16 @@ fn main() {
         }
     }
 }
+
+#[test]
+fn struct_sizes() {
+    use core::mem::size_of;
+    eprintln!(
+        "DefaultEncoder = {} bytes",
+        size_of::<heatshrink::DefaultEncoder>()
+    );
+    eprintln!(
+        "DefaultDecoder = {} bytes",
+        size_of::<heatshrink::DefaultDecoder>()
+    );
+}
