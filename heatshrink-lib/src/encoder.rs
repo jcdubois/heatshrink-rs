@@ -1,4 +1,4 @@
-use super::EncodeError;
+use super::CodecError;
 use super::Finish;
 use super::Poll;
 use super::PollError;
@@ -54,7 +54,7 @@ pub struct HeatshrinkEncoder<const W: usize, const L: usize, const BUF: usize> {
 }
 
 /// Compress `src` into `dst` using the default parameters (W=8, L=4).
-pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], EncodeError> {
+pub fn encode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], CodecError> {
     let mut enc = super::DefaultEncoder::new();
     run_encode(&mut enc, src, dst)
 }
@@ -64,7 +64,7 @@ pub(crate) fn run_encode<'a, const W: usize, const L: usize, const BUF: usize>(
     enc: &mut HeatshrinkEncoder<W, L, BUF>,
     src: &[u8],
     dst: &'a mut [u8],
-) -> Result<&'a [u8], EncodeError> {
+) -> Result<&'a [u8], CodecError> {
     let mut total_input_size = 0;
     let mut total_output_size = 0;
 
@@ -73,7 +73,7 @@ pub(crate) fn run_encode<'a, const W: usize, const L: usize, const BUF: usize>(
             match enc.sink(&src[total_input_size..]) {
                 Ok(n) => total_input_size += n,
                 Err(SinkError::Full) => {}
-                Err(SinkError::Misuse) => return Err(EncodeError::Internal),
+                Err(SinkError::Misuse) => return Err(CodecError::Internal),
             }
         }
 
@@ -82,14 +82,14 @@ pub(crate) fn run_encode<'a, const W: usize, const L: usize, const BUF: usize>(
         }
 
         if total_output_size == dst.len() {
-            return Err(EncodeError::OutputFull);
+            return Err(CodecError::OutputFull);
         }
 
         match enc.poll(&mut dst[total_output_size..]) {
             Ok(Poll::More(n)) => {
                 total_output_size += n;
                 if total_output_size == dst.len() {
-                    return Err(EncodeError::OutputFull);
+                    return Err(CodecError::OutputFull);
                 }
             }
             Ok(Poll::Empty(n)) => {
@@ -98,7 +98,7 @@ pub(crate) fn run_encode<'a, const W: usize, const L: usize, const BUF: usize>(
                     break;
                 }
             }
-            Err(_) => return Err(EncodeError::Internal),
+            Err(_) => return Err(CodecError::Internal),
         }
     }
 
@@ -146,20 +146,7 @@ impl<const W: usize, const L: usize, const BUF: usize> HeatshrinkEncoder<W, L, B
 
     /// Reset the encoder to its initial state so it can be reused.
     pub fn reset(&mut self) {
-        self.input_size = 0;
-        self.match_scan_index = 0;
-        self.match_length = 0;
-        self.match_position = 0;
-        self.outgoing_bits = 0;
-        self.outgoing_bits_count = 0;
-        self.is_finishing = false;
-        self.current_byte = 0;
-        self.bit_index = 8;
-        self.state = HSEstate::NotFull;
-        #[cfg(feature = "heatshrink-use-index")]
-        {
-            self.search_index.fill(u16::MAX);
-        }
+        *self = Self::new();
     }
 
     /// Feed input data into the encoder.

@@ -133,7 +133,7 @@ pub enum Finish {
 /// Error returned by the convenience functions [`encoder::encode`] and
 /// [`decoder::decode`].
 #[derive(Debug)]
-pub enum EncodeError {
+pub enum CodecError {
     /// Output buffer was too small to hold the result.
     OutputFull,
     /// Internal error (should not occur in normal use).

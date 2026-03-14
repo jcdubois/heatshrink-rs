@@ -1,4 +1,4 @@
-use super::EncodeError;
+use super::CodecError;
 use super::Finish;
 use super::Poll;
 use super::PollError;
@@ -47,7 +47,7 @@ pub struct HeatshrinkDecoder<const W: usize, const L: usize, const I: usize, con
 }
 
 /// Decompress `src` into `dst` using the default parameters (W=8, L=4, I=32).
-pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], EncodeError> {
+pub fn decode<'a>(src: &[u8], dst: &'a mut [u8]) -> Result<&'a [u8], CodecError> {
     let mut dec = super::DefaultDecoder::new();
     run_decode(&mut dec, src, dst)
 }
@@ -57,7 +57,7 @@ pub(crate) fn run_decode<'a, const W: usize, const L: usize, const I: usize, con
     dec: &mut HeatshrinkDecoder<W, L, I, WIN>,
     src: &[u8],
     dst: &'a mut [u8],
-) -> Result<&'a [u8], EncodeError> {
+) -> Result<&'a [u8], CodecError> {
     let mut total_input_size = 0;
     let mut total_output_size = 0;
 
@@ -65,23 +65,23 @@ pub(crate) fn run_decode<'a, const W: usize, const L: usize, const I: usize, con
         match dec.sink(&src[total_input_size..]) {
             Ok(n) => total_input_size += n,
             Err(SinkError::Full) => {}
-            Err(SinkError::Misuse) => return Err(EncodeError::Internal),
+            Err(SinkError::Misuse) => return Err(CodecError::Internal),
         }
 
         if total_output_size == dst.len() {
-            return Err(EncodeError::OutputFull);
+            return Err(CodecError::OutputFull);
         }
 
         match dec.poll(&mut dst[total_output_size..]) {
-            Ok(Poll::More(_)) => return Err(EncodeError::OutputFull),
+            Ok(Poll::More(_)) => return Err(CodecError::OutputFull),
             Ok(Poll::Empty(n)) => total_output_size += n,
-            Err(_) => return Err(EncodeError::Internal),
+            Err(_) => return Err(CodecError::Internal),
         }
 
         if total_input_size == src.len() {
             match dec.finish() {
                 Finish::Done => {}
-                Finish::More => return Err(EncodeError::OutputFull),
+                Finish::More => return Err(CodecError::OutputFull),
             }
         }
     }
@@ -130,18 +130,7 @@ impl<const W: usize, const L: usize, const I: usize, const WIN: usize>
 
     /// Reset the decoder to its initial state so it can be reused.
     pub fn reset(&mut self) {
-        self.input_size = 0;
-        self.input_index = 0;
-        self.output_count = 0;
-        self.output_index = 0;
-        self.head_index = 0;
-        self.current_byte = 0;
-        self.bit_index = 0;
-        self.state = HSDstate::TagBit;
-        self.input_buffer.fill(0);
-        // output_buffer must stay zeroed: back-references before the start of
-        // the stream must yield 0x00.
-        self.output_buffer.fill(0);
+        *self = Self::new();
     }
 
     /// Feed compressed data into the decoder.
