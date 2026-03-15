@@ -200,6 +200,17 @@ The search index adds `2 << W` × 2 bytes to the encoder: for W=8 that is
 512 × 2 = 1024 bytes. Larger window sizes grow the index proportionally —
 at W=14 the index alone occupies 32 KB.
 
+## Performance
+
+The choice of `W` and `L` parameters affects compression ratio, compression
+speed, and decompression speed. The graphs below illustrate these trade-offs
+for a representative dataset.
+
+Benchmarks were run on a Core i5-8350U @ 1.7 GHz using accelerometer compressed
+data.
+
+![Compression Performance](./average-compression-tsz-data.png)
+
 ## Migrating from 0.4.x
 
 Version 0.4.x had hardcoded parameters (`W=8, L=4`) and C-style return codes.
