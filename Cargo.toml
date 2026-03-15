@@ -4,7 +4,7 @@
 
 [workspace.package]
  authors = ["J-C Dubois"]
- categories = ["compression", "embedded"]
+ categories = ["compression", "embedded", "no-std"]
  description = "A minimal library implementing the heatshrink compression algorithm for no_std environments"
  edition = "2024"
  license = "ISC"
@@ -12,6 +12,7 @@
  readme = "README.md"
  repository = "https://github.com/jcdubois/heatshrink-rs"
  version = "1.0.0"
+ keywords = ["compression", "embedded", "no_std", "lzss", "heatshrink"]
 
 [workspace.dependencies]
  clap = { version = "4.4.8", features = ["derive"] }
