@@ -1,0 +1,2 @@
+[workspace]
+tag-name = "v{{version}}"
